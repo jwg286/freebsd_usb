@@ -1,0 +1,3 @@
+# $FreeBSD: src/sys/arm/mv/discovery/files.db78xxx,v 1.2 2010/06/13 13:28:53 raj Exp $
+
+arm/mv/discovery/discovery.c	standard

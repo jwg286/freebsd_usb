@@ -1,0 +1,13 @@
+#
+# DEFAULTS -- Default kernel configuration file for FreeBSD/sun4v
+#
+# $FreeBSD: src/sys/sun4v/conf/DEFAULTS,v 1.11 2010/07/13 01:24:02 nwhitehorn Exp $
+
+machine		sun4v sparc64
+
+# Pseudo devices.
+device		mem		# Memory and kernel memory devices
+
+# Default partitioning schemes
+options 	GEOM_PART_BSD
+options 	GEOM_PART_VTOC8
