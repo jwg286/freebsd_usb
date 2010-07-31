@@ -126,6 +126,35 @@ struct usb_softc {
 	char		sc_dying;
 };
 
+d_open_t  usbopen;
+d_close_t usbclose;
+d_read_t usbread;
+d_ioctl_t usbioctl;
+d_poll_t usbpoll;
+
+struct cdevsw usb_cdevsw = {
+	.d_version =	D_VERSION,
+	.d_flags =	D_NEEDGIANT,
+	.d_open =	usbopen,
+	.d_close =	usbclose,
+	.d_read =	usbread,
+	.d_ioctl =	usbioctl,
+	.d_poll =	usbpoll,
+	.d_name =	"usb",
+};
+
+static void	usb_create_event_thread(void *);
+
+static struct cdev *usb_dev;		/* The /dev/usb device. */
+static int usb_ndevs;			/* Number of /dev/usbN devices. */
+/* Busses to explore at the end of boot-time device configuration. */
+static TAILQ_HEAD(, usb_softc) usb_coldexplist =
+    TAILQ_HEAD_INITIALIZER(usb_coldexplist);
+
+static void usb_add_event(int, struct usb_event *);
+
+static const char *usbrev_str[] = USBREV_STR;
+
 static device_probe_t usb_match;
 static device_attach_t usb_attach;
 static device_detach_t usb_detach;
@@ -170,9 +199,110 @@ usb_match(device_t self)
 static int
 usb_attach(device_t self)
 {
+	struct usb_softc *sc = device_get_softc(self);
+	void *aux = device_get_ivars(self);
+	usbd_device_handle dev;
+	usbd_status err;
+	int usbrev;
+	int speed;
+	struct usb_event ue;
 
-	printf("%s: TODO\n", __func__);
-	return (ENXIO);
+	sc->sc_dev = self;
+
+	DPRINTF(("usbd_attach\n"));
+
+	usbd_init();
+	sc->sc_bus = aux;
+	sc->sc_bus->usbctl = sc;
+	sc->sc_port.power = USB_MAX_POWER;
+
+	printf("%s", device_get_nameunit(sc->sc_dev));
+	usbrev = sc->sc_bus->usbrev;
+	printf(": USB revision %s", usbrev_str[usbrev]);
+	switch (usbrev) {
+	case USBREV_1_0:
+	case USBREV_1_1:
+		speed = USB_SPEED_FULL;
+		break;
+	case USBREV_2_0:
+		speed = USB_SPEED_HIGH;
+		break;
+	default:
+		printf(", not supported\n");
+		sc->sc_dying = 1;
+		return ENXIO;
+	}
+	printf("\n");
+
+	/* Make sure not to use tsleep() if we are cold booting. */
+	if (cold)
+		sc->sc_bus->use_polling++;
+
+	ue.u.ue_ctrlr.ue_bus = device_get_unit(sc->sc_dev);
+	usb_add_event(USB_EVENT_CTRLR_ATTACH, &ue);
+
+#ifdef USB_USE_SOFTINTR
+#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
+	/* XXX we should have our own level */
+	sc->sc_bus->soft = softintr_establish(IPL_SOFTNET,
+	    sc->sc_bus->methods->soft_intr, sc->sc_bus);
+	if (sc->sc_bus->soft == NULL) {
+		printf("%s: can't register softintr\n", device_get_nameunit(sc->sc_dev));
+		sc->sc_dying = 1;
+		return ENXIO;
+	}
+#else
+	usb_callout_init(sc->sc_bus->softi);
+#endif
+#endif
+
+	err = usbd_new_device(sc->sc_dev, sc->sc_bus, 0, speed, 0,
+		  &sc->sc_port);
+	if (!err) {
+		dev = sc->sc_port.device;
+		if (dev->hub == NULL) {
+			sc->sc_dying = 1;
+			printf("%s: root device is not a hub\n",
+			       device_get_nameunit(sc->sc_dev));
+			return ENXIO;
+		}
+		sc->sc_bus->root_hub = dev;
+#if 1
+		/*
+		 * Turning this code off will delay attachment of USB devices
+		 * until the USB event thread is running, which means that
+		 * the keyboard will not work until after cold boot.
+		 */
+		if (cold) {
+			/* Explore high-speed busses before others. */
+			if (speed == USB_SPEED_HIGH)
+				dev->hub->explore(sc->sc_bus->root_hub);
+			else
+				TAILQ_INSERT_TAIL(&usb_coldexplist, sc,
+				    sc_coldexplist);
+		}
+#endif
+	} else {
+		printf("%s: root hub problem, error=%d\n",
+		       device_get_nameunit(sc->sc_dev), err);
+		sc->sc_dying = 1;
+	}
+	if (cold)
+		sc->sc_bus->use_polling--;
+
+	/* XXX really do right config_pending_incr(); */
+	usb_create_event_thread(sc);
+	/* The per controller devices (used for usb_discover) */
+	/* XXX This is redundant now, but old usbd's will want it */
+	sc->sc_usbdev = make_dev(&usb_cdevsw, device_get_unit(self), UID_ROOT,
+	    GID_OPERATOR, 0660, "usb%d", device_get_unit(self));
+	if (atomic_cmpset_int(&usb_ndevs, 0, 1)) {
+		/* The device spitting out events */
+		usb_dev = make_dev(&usb_cdevsw, USB_DEV_MINOR, UID_ROOT,
+		    GID_OPERATOR, 0660, "usb");
+	} else
+		atomic_add_int(&usb_ndevs, 1);
+	return 0;
 }
 
 static int
@@ -188,4 +318,58 @@ usb_child_detached(device_t self, device_t child)
 {
 
 	printf("%s: TODO\n", __func__);
+}
+
+void
+usb_add_event(int type, struct usb_event *uep)
+{
+
+	TODO();
+}
+
+void
+usb_create_event_thread(void *arg)
+{
+
+	TODO();
+}
+
+int
+usbopen(struct cdev *dev, int flag, int mode, struct thread *p)
+{
+
+	TODO();
+	return (ENXIO);
+}
+
+int
+usbread(struct cdev *dev, struct uio *uio, int flag)
+{
+
+	TODO();
+	return (ENXIO);
+}
+
+int
+usbclose(struct cdev *dev, int flag, int mode, struct thread *p)
+{
+
+	TODO();
+	return (ENXIO);
+}
+
+int
+usbioctl(struct cdev *devt, u_long cmd, caddr_t data, int flag, struct thread *p)
+{
+
+	TODO();
+	return (ENXIO);
+}
+
+int
+usbpoll(struct cdev *dev, int events, struct thread *p)
+{
+
+	TODO();
+	return (ENXIO);
 }

@@ -92,3 +92,18 @@ usb_delay_ms(usbd_bus_handle bus, u_int ms)
 	else
 		pause("usbdly", (ms*hz+999)/1000 + 1);
 }
+
+/*
+ * Called when a new device has been put in the powered state,
+ * but not yet in the addressed state.
+ * Get initial descriptor, set the address, get full descriptor,
+ * and attach a driver.
+ */
+usbd_status
+usbd_new_device(device_t parent, usbd_bus_handle bus, int depth,
+		int speed, int port, struct usbd_port *up)
+{
+
+	TODO();
+	return (USBD_INVAL);
+}

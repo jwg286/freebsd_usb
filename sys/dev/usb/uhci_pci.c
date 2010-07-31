@@ -298,7 +298,7 @@ static void
 uhci_pci_busdma_lock_mutex(void *arg, bus_dma_lock_op_t op)
 {
 
-	printf("%s: TODO\n", __func__);
+	TODO();
 }
 
 static int

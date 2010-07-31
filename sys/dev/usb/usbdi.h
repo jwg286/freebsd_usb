@@ -270,17 +270,4 @@ usb_get_iface(device_t dev)
 	return (uap->iface);
 }
 
-/* XXX Perhaps USB should have its own levels? */
-#ifdef USB_USE_SOFTINTR
-#ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
-#define splusb splsoftnet
-#else
-#define	splusb splsoftclock
-#endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
-#else
-#define splusb splbio
-#endif /* USB_USE_SOFTINTR */
-#define splhardusb splbio
-#define IPL_USB IPL_BIO
-
 #endif /* _USBDI_H_ */

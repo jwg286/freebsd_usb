@@ -72,6 +72,20 @@ extern int usbdebug;
 #define DPRINTFN(n,x)
 #endif
 
+static int usbd_nbuses = 0;
+
+void
+usbd_init(void)
+{
+	usbd_nbuses++;
+}
+
+void
+usbd_finish(void)
+{
+	--usbd_nbuses;
+}
+
 int
 usbd_driver_load(module_t mod, int what, void *arg)
 {
