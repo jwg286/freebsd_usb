@@ -120,7 +120,6 @@ SUBDIR=	${_3dfx} \
 	if_gif \
 	if_gre \
 	if_lagg \
-	${_if_ndis} \
 	if_stf \
 	if_tap \
 	if_tun \
@@ -197,7 +196,6 @@ SUBDIR=	${_3dfx} \
 	my \
 	${_ncp} \
 	${_ncv} \
-	${_ndis} \
 	${_netgraph} \
 	${_nfe} \
 	nfs_common \
@@ -293,7 +291,6 @@ SUBDIR=	${_3dfx} \
 	udf_iconv \
 	ufs \
 	unionfs \
-	usb \
 	utopia \
 	${_vesa} \
 	vge \
@@ -398,7 +395,6 @@ _glxsb=		glxsb
 _i2c=		i2c
 _ibcs2=		ibcs2
 _ie=		ie
-_if_ndis=	if_ndis
 _igb=		igb
 _io=		io
 _lindev=	lindev
@@ -410,7 +406,6 @@ _mse=		mse
 _ncp=		ncp
 .endif
 _ncv=		ncv
-_ndis=		ndis
 _nsp=		nsp
 .if ${MK_NCP} != "no"
 _nwfs=		nwfs
@@ -534,7 +529,6 @@ _hptrr=		hptrr
 _i2c=		i2c
 _ichwd=		ichwd
 _ida=		ida
-_if_ndis=	if_ndis
 _igb=		igb
 _iir=		iir
 _io=		io
@@ -553,7 +547,6 @@ _linprocfs=	linprocfs
 _linsysfs=	linsysfs
 _linux=		linux
 _mly=		mly
-_ndis=		ndis
 _nfe=		nfe
 _nve=		nve
 _nvram=		nvram
