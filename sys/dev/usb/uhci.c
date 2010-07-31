@@ -229,3 +229,18 @@ uhci_dumpregs(uhci_softc_t *sc)
 		     UREAD2(sc, UHCI_PORTSC2)));
 }
 #endif
+
+int
+uhci_driver_load(module_t mod, int what, void *arg)
+{
+
+	switch (what) {
+	case MOD_LOAD:
+		usbmem_driver_load();
+		break;
+	case MOD_UNLOAD:
+		usbmem_driver_unload();
+		break;
+	}
+	return usbd_driver_load(mod, what, 0);
+}

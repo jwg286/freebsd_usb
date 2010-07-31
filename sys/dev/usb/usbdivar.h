@@ -318,3 +318,5 @@ void		usb_schedsoftintr(struct usbd_bus *);
 #define	UHUB_UNK_PRODUCT	UHUBCF_PRODUCT_DEFAULT /* wildcarded 'product' */
 #define	UHUB_UNK_RELEASE	UHUBCF_RELEASE_DEFAULT /* wildcarded 'release' */
 
+/* XXX DELETE ME */
+#define	TODO()		printf("%s: TODO\n", __func__);

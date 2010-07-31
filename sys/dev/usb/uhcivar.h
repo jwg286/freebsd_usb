@@ -203,4 +203,4 @@ int		uhci_intr(void *);
 int		uhci_detach(uhci_softc_t *, int);
 void		uhci_shutdown(void *v);
 void		uhci_power(int state, void *priv);
-
+int		uhci_driver_load(module_t, int, void *);

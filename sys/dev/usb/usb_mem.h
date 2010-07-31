@@ -40,6 +40,7 @@
 
 typedef struct usb_dma_block {
 	bus_dma_tag_t tag;
+	bus_dma_tag_t ptag;	/* parent tag */
 	bus_dmamap_t map;
 	void *kaddr;
         bus_dma_segment_t segs[1];
@@ -54,5 +55,7 @@ typedef struct usb_dma_block {
 #define KERNADDR(dma, o) \
 	((void *)((char *)((dma)->block->kaddr) + (dma)->offs + (o)))
 
+void		usbmem_driver_load(void);
+void		usbmem_driver_unload(void);
 usbd_status	usb_allocmem(usbd_bus_handle,size_t,size_t, usb_dma_t *);
 void		usb_freemem(usbd_bus_handle, usb_dma_t *);
