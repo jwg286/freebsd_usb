@@ -24,4 +24,6 @@ SRCS+=	ohci_pci.c ohci.c ohcireg.h ohcivar.h
 SRCS+=	ehci_pci.c ehci.c ehcireg.h ehcivar.h
 SRCS+=	opt_bus.h pci_if.h
 
+DEBUG_FLAGS=	-g -O0 -DUSB_DEBUG
+
 .include <bsd.kmod.mk>
