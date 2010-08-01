@@ -76,6 +76,7 @@ __FBSDID("$FreeBSD: stable/7/sys/dev/usb/uhci.c 196167 2009-08-13 07:21:24Z n_hi
 #include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/sysctl.h>
+#include <sys/taskqueue.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -149,6 +150,8 @@ struct uhci_pipe {
 	} u;
 };
 
+static void		uhci_reset_proc(void *, int);
+static void		uhci_poll_hub(void *);
 static void		uhci_aux_dma_complete(uhci_soft_td_t *, int);
 static usbd_status	uhci_portreset(uhci_softc_t*, int);
 static void		uhci_timeout_task(void *);
@@ -429,6 +432,7 @@ uhci_init(uhci_softc_t *sc)
 #endif
 
 	UHCI_LOCK_INIT(sc);
+	TASK_INIT(&sc->sc_resettask, 0, uhci_reset_proc, sc);
 
 	UWRITE2(sc, UHCI_INTR, 0);		/* disable interrupts */
 	uhci_globalreset(sc);			/* reset the controller */
@@ -576,7 +580,9 @@ uhci_run(uhci_softc_t *sc, int run)
 				 UREAD2(sc, UHCI_CMD), UREAD2(sc, UHCI_STS)));
 			return (USBD_NORMAL_COMPLETION);
 		}
+		UHCI_UNLOCK(sc);
 		usb_delay_ms(&sc->sc_bus, 1);
+		UHCI_LOCK(sc);
 	}
 	UHCI_UNLOCK(sc);
 	printf("%s: cannot %s\n", device_get_nameunit(sc->sc_bus.bdev),
@@ -783,41 +789,8 @@ uhci_intr1(uhci_softc_t *sc)
 	UWRITE2(sc, UHCI_STS, ack & ~UHCI_STS_HCH); /* acknowledge the ints */
 
 	if (ack & UHCI_STS_HCH) {
-		/* Restart the controller, by Manuel Bouyer */
-		sc->sc_saved_frnum = UREAD2(sc, UHCI_FRNUM);
-		sc->sc_saved_sof = UREAD1(sc, UHCI_SOF);
-
-		sc->sc_bus.use_polling++;
-		uhci_run(sc, 0); /* stop the controller */
-		UWRITE2(sc, UHCI_INTR, 0); /* disable intrs */
-
-		uhci_globalreset(sc);
-		uhci_reset(sc);
-
-		/* restore saved state */
-		UWRITE4(sc, UHCI_FLBASEADDR, DMAADDR(&sc->sc_dma, 0));
-		UWRITE2(sc, UHCI_FRNUM, sc->sc_saved_frnum);
-		UWRITE1(sc, UHCI_SOF, sc->sc_saved_sof);
-
-		UWRITE2(sc, UHCI_INTR, UHCI_INTR_TOCRCIE | UHCI_INTR_RIE |
-			UHCI_INTR_IOCE | UHCI_INTR_SPIE); /* re-enable intrs */
-		UHCICMD(sc, UHCI_CMD_MAXP);
-
-		uhci_run(sc, 1); /* and start traffic again */
-		sc->sc_bus.use_polling--;
-
-		if (UREAD2(sc, UHCI_STS) & UHCI_STS_HCH) {
-			printf("%s: host controller couldn't be restarted\n",
-			       device_get_nameunit(sc->sc_bus.bdev));
-#ifdef USB_DEBUG
-			uhci_dump_all(sc);
-#endif
-			sc->sc_dying = 1;
-			return (0);
-		}
-
-		printf("%s: host controller restarted\n",
-		       device_get_nameunit(sc->sc_bus.bdev));
+		taskqueue_enqueue(sc->sc_tq, &sc->sc_resettask);
+		return (0);
 	}
 
 	sc->sc_bus.no_intrs++;
@@ -828,10 +801,53 @@ uhci_intr1(uhci_softc_t *sc)
 	return (1);
 }
 
+static void
+uhci_reset_proc(void *arg, int npending)
+{
+	uhci_softc_t *sc = arg;
+
+	/* Restart the controller, by Manuel Bouyer */
+	sc->sc_saved_frnum = UREAD2(sc, UHCI_FRNUM);
+	sc->sc_saved_sof = UREAD1(sc, UHCI_SOF);
+
+	sc->sc_bus.use_polling++;
+	uhci_run(sc, 0); /* stop the controller */
+	UWRITE2(sc, UHCI_INTR, 0); /* disable intrs */
+
+	uhci_globalreset(sc);
+	uhci_reset(sc);
+
+	/* restore saved state */
+	UWRITE4(sc, UHCI_FLBASEADDR, DMAADDR(&sc->sc_dma, 0));
+	UWRITE2(sc, UHCI_FRNUM, sc->sc_saved_frnum);
+	UWRITE1(sc, UHCI_SOF, sc->sc_saved_sof);
+
+	UWRITE2(sc, UHCI_INTR, UHCI_INTR_TOCRCIE | UHCI_INTR_RIE |
+	    UHCI_INTR_IOCE | UHCI_INTR_SPIE); /* re-enable intrs */
+	UHCICMD(sc, UHCI_CMD_MAXP);
+
+	uhci_run(sc, 1); /* and start traffic again */
+	sc->sc_bus.use_polling--;
+
+	if (UREAD2(sc, UHCI_STS) & UHCI_STS_HCH) {
+		printf("%s: host controller couldn't be restarted\n",
+		    device_get_nameunit(sc->sc_bus.bdev));
+#ifdef USB_DEBUG
+		uhci_dump_all(sc);
+#endif
+		sc->sc_dying = 1;
+	}
+
+	printf("%s: host controller restarted\n",
+	    device_get_nameunit(sc->sc_bus.bdev));
+}
+
 void
 usb_schedsoftintr(usbd_bus_handle bus)
 {
+
 	DPRINTFN(10,("usb_schedsoftintr: polling=%d\n", bus->use_polling));
+	KASSERT(bus->methods != NULL, ("method pointer is NULL"));
 #ifdef USB_USE_SOFTINTR
 	if (bus->use_polling) {
 		bus->methods->soft_intr(bus);
@@ -1486,41 +1502,75 @@ uhci_root_ctrl_done(usbd_xfer_handle xfer)
 usbd_status
 uhci_root_intr_transfer(usbd_xfer_handle xfer)
 {
+	usbd_status err;
 
-	TODO();
-	return (USBD_INVAL);
+	/* Insert last in queue. */
+	err = usb_insert_transfer(xfer);
+	if (err)
+		return (err);
+
+	/*
+	 * Pipe isn't running (otherwise err would be USBD_INPROG),
+	 * so start it first.
+	 */
+	return (uhci_root_intr_start(STAILQ_FIRST(&xfer->pipe->queue)));
 }
 
 /* Start a transfer on the root interrupt pipe */
 usbd_status
 uhci_root_intr_start(usbd_xfer_handle xfer)
 {
+	usbd_pipe_handle pipe = xfer->pipe;
+	uhci_softc_t *sc = (uhci_softc_t *)pipe->device->bus;
 
-	TODO();
-	return (USBD_INVAL);
+	DPRINTFN(3, ("uhci_root_intr_start: xfer=%p len=%d flags=%d\n",
+		     xfer, xfer->length, xfer->flags));
+
+	if (sc->sc_dying)
+		return (USBD_IOERROR);
+
+	sc->sc_ival = MS_TO_TICKS(xfer->pipe->endpoint->edesc->bInterval);
+	callout_reset(&sc->sc_poll_handle, sc->sc_ival, uhci_poll_hub, xfer);
+	sc->sc_intr_xfer = xfer;
+	return (USBD_IN_PROGRESS);
 }
 
 /* Close the root interrupt pipe. */
 void
 uhci_root_intr_close(usbd_pipe_handle pipe)
 {
+	uhci_softc_t *sc = (uhci_softc_t *)pipe->device->bus;
 
-	TODO();
+	callout_stop(&sc->sc_poll_handle);
+	sc->sc_intr_xfer = NULL;
+	DPRINTF(("uhci_root_intr_close\n"));
 }
 
 /* Abort a root interrupt request. */
 void
 uhci_root_intr_abort(usbd_xfer_handle xfer)
 {
+	uhci_softc_t *sc = (uhci_softc_t *)xfer->pipe->device->bus;
 
-	TODO();
+	callout_stop(&sc->sc_poll_handle);
+	sc->sc_intr_xfer = NULL;
+
+	if (xfer->pipe->intrxfer == xfer) {
+		DPRINTF(("uhci_root_intr_abort: remove\n"));
+		xfer->pipe->intrxfer = 0;
+	}
+	xfer->status = USBD_CANCELLED;
+#ifdef DIAGNOSTIC
+	UXFER(xfer)->iinfo.isdone = 1;
+#endif
+	uhci_transfer_complete(xfer);
 }
 
 void
 uhci_root_intr_done(usbd_xfer_handle xfer)
 {
 
-	TODO();
+	/* do nothing */
 }
 
 usbd_status
@@ -1861,4 +1911,38 @@ uhci_aux_dma_complete(uhci_soft_td_t *std, int isread)
 		    std->aux_dma.block->map, BUS_DMASYNC_POSTREAD);
 		bcopy(KERNADDR(&std->aux_dma, 0), std->aux_data, std->aux_len);
 	}
+}
+
+/*
+ * This routine is executed periodically and simulates interrupts
+ * from the root controller interrupt pipe for port status change.
+ */
+void
+uhci_poll_hub(void *addr)
+{
+	usbd_xfer_handle xfer = addr;
+	usbd_pipe_handle pipe = xfer->pipe;
+	usbd_device_handle dev = pipe->device;
+	uhci_softc_t *sc = (uhci_softc_t *)dev->bus;
+	u_char *p;
+
+	DPRINTFN(20, ("uhci_poll_hub\n"));
+
+	callout_reset(&sc->sc_poll_handle, sc->sc_ival, uhci_poll_hub, xfer);
+
+	p = xfer->buffer;
+	p[0] = 0;
+	if (UREAD2(sc, UHCI_PORTSC1) & (UHCI_PORTSC_CSC|UHCI_PORTSC_OCIC))
+		p[0] |= 1<<1;
+	if (UREAD2(sc, UHCI_PORTSC2) & (UHCI_PORTSC_CSC|UHCI_PORTSC_OCIC))
+		p[0] |= 1<<2;
+	if (p[0] == 0)
+		/* No change, try again in a while */
+		return;
+
+	xfer->actlen = 1;
+	xfer->status = USBD_NORMAL_COMPLETION;
+	dev->bus->intr_context++;
+	uhci_transfer_complete(xfer);
+	dev->bus->intr_context--;
 }

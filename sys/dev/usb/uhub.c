@@ -180,9 +180,10 @@ uhub_attach(device_t self)
 	struct usbd_hub *hub = NULL;
 	usb_device_request_t req;
 	usb_hub_descriptor_t hubdesc;
-	int port, nports, nremov;
+	int p, port, nports, nremov, pwrdly;
 	usbd_interface_handle iface;
 	usb_endpoint_descriptor_t *ed;
+	struct usbd_tt *tts = NULL;
 
 	DPRINTFN(1,("uhub_attach\n"));
 	sc->sc_hub = dev;
@@ -289,9 +290,78 @@ uhub_attach(device_t self)
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, dev, sc->sc_dev);
 
-	TODO();
-	return (ENXIO);
+	/*
+	 * To have the best chance of success we do things in the exact same
+	 * order as Windoze98.  This should not be necessary, but some
+	 * devices do not follow the USB specs to the letter.
+	 *
+	 * These are the events on the bus when a hub is attached:
+	 *  Get device and config descriptors (see attach code)
+	 *  Get hub descriptor (see above)
+	 *  For all ports
+	 *     turn on power
+	 *     wait for power to become stable
+	 * (all below happens in explore code)
+	 *  For all ports
+	 *     clear C_PORT_CONNECTION
+	 *  For all ports
+	 *     get port status
+	 *     if device connected
+	 *        wait 100 ms
+	 *        turn on reset
+	 *        wait
+	 *        clear C_PORT_RESET
+	 *        get port status
+	 *        proceed with device attachment
+	 */
 
+	if (UHUB_IS_HIGH_SPEED(sc)) {
+		tts = malloc((UHUB_IS_SINGLE_TT(sc) ? 1 : nports) *
+		    sizeof (struct usbd_tt), M_USBDEV, M_NOWAIT);
+		if (!tts)
+			goto bad;
+	}
+
+	/* Set up data structures */
+	for (p = 0; p < nports; p++) {
+		struct usbd_port *up = &hub->ports[p];
+		up->device = NULL;
+		up->parent = dev;
+		up->portno = p+1;
+		if (dev->self_powered)
+			/* Self powered hub, give ports maximum current. */
+			up->power = USB_MAX_POWER;
+		else
+			up->power = USB_MIN_POWER;
+		up->restartcnt = 0;
+		if (UHUB_IS_HIGH_SPEED(sc)) {
+			up->tt = &tts[UHUB_IS_SINGLE_TT(sc) ? 0 : p];
+			up->tt->hub = hub;
+		} else {
+			up->tt = NULL;
+		}
+	}
+
+	/* XXX should check for none, individual, or ganged power? */
+
+	pwrdly = dev->hub->hubdesc.bPwrOn2PwrGood * UHD_PWRON_FACTOR
+	    + USB_EXTRA_POWER_UP_TIME;
+	for (port = 1; port <= nports; port++) {
+		/* Turn the power on. */
+		err = usbd_set_port_feature(dev, port, UHF_PORT_POWER);
+		if (err)
+			device_printf(sc->sc_dev,
+			    "port %d power on failed, %s\n", port,
+			    usbd_errstr(err));
+		DPRINTF(("usb_init_port: turn on port %d power\n", port));
+		/* Wait for stable power. */
+		usbd_delay_ms(dev, pwrdly);
+	}
+
+	/* The usual exploration will finish the setup. */
+
+	sc->sc_running = 1;
+	return (0);
  bad:
 	if (hub)
 		free(hub, M_USBDEV);
@@ -306,8 +376,32 @@ uhub_attach(device_t self)
 static int
 uhub_detach(device_t self)
 {
+	struct uhub_softc *sc = device_get_softc(self);
+	struct usbd_hub *hub = sc->sc_hub->hub;
+	struct usbd_port *rup;
+	int port, nports;
 
-	TODO();
+	DPRINTF(("uhub_detach: sc=%port\n", sc));
+	if (hub == NULL)		/* Must be partially working */
+		return (0);
+
+	usbd_abort_pipe(sc->sc_ipipe);
+	usbd_close_pipe(sc->sc_ipipe);
+
+	nports = hub->hubdesc.bNbrPorts;
+	for(port = 0; port < nports; port++) {
+		rup = &hub->ports[port];
+		if (rup->device)
+			usb_disconnect_port(rup, self);
+	}
+
+	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_hub, sc->sc_dev);
+
+	if (hub->ports[0].tt)
+		free(hub->ports[0].tt, M_USBDEV);
+	free(hub, M_USBDEV);
+	sc->sc_hub->hub = NULL;
+
 	return (0);
 }
 

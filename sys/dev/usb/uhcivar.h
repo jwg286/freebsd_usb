@@ -143,6 +143,8 @@ struct uhci_vframe {
 typedef struct uhci_softc {
 	struct usbd_bus sc_bus;		/* base device */
 	struct mtx sc_mtx;
+	struct taskqueue *sc_tq;	/* private task queue */
+	struct task sc_resettask;
 	int sc_flags;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;

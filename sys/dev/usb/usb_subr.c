@@ -426,6 +426,7 @@ void
 usbd_remove_device(usbd_device_handle dev, struct usbd_port *up)
 {
 
+	TODO();
 	DPRINTF(("usbd_remove_device: %p\n", dev));
 
 	if (dev->default_pipe != NULL)

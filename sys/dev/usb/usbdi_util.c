@@ -98,3 +98,16 @@ usbd_get_device_desc(usbd_device_handle dev, usb_device_descriptor_t *d)
 	return (usbd_get_desc(dev, UDESC_DEVICE,
 			     0, USB_DEVICE_DESCRIPTOR_SIZE, d));
 }
+
+usbd_status
+usbd_set_port_feature(usbd_device_handle dev, int port, int sel)
+{
+	usb_device_request_t req;
+
+	req.bmRequestType = UT_WRITE_CLASS_OTHER;
+	req.bRequest = UR_SET_FEATURE;
+	USETW(req.wValue, sel);
+	USETW(req.wIndex, port);
+	USETW(req.wLength, 0);
+	return (usbd_do_request(dev, &req, 0));
+}

@@ -379,8 +379,10 @@ usb_detach(device_t self)
 static void
 usb_child_detached(device_t self, device_t child)
 {
+	struct usb_softc *sc = device_get_softc(self);
 
-	printf("%s: TODO\n", __func__);
+	/* XXX, should check it is the right device. */
+	sc->sc_port.device = NULL;
 }
 
 void

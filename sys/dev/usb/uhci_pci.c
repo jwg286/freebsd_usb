@@ -59,6 +59,7 @@ __FBSDID("$FreeBSD: stable/7/sys/dev/usb/uhci_pci.c 178442 2008-04-23 18:54:51Z 
 #include <sys/bus.h>
 #include <sys/queue.h>
 #include <sys/bus.h>
+#include <sys/taskqueue.h>
 
 #include <machine/bus.h>
 #include <machine/resource.h>
@@ -410,6 +411,9 @@ uhci_pci_attach(device_t self)
 		uhci_pci_detach(self);
 		return ENXIO;
 	}
+	sc->sc_tq = taskqueue_create_fast("uhci_taskq", M_NOWAIT,
+	    taskqueue_thread_enqueue, &sc->sc_tq);
+	taskqueue_start_threads(&sc->sc_tq, 1, PI_NET, "uhci taskq");
 
 	err = uhci_init(sc);
 	if (!err) {
@@ -448,6 +452,11 @@ uhci_pci_detach(device_t self)
 			device_printf(self, "Could not tear down irq, %d\n",
 			    err);
 		sc->ih = NULL;
+	}
+	if (sc->sc_tq != NULL) {
+		taskqueue_drain(sc->sc_tq, &sc->sc_resettask);
+		taskqueue_free(sc->sc_tq);
+		sc->sc_tq = NULL;
 	}
 	if (sc->sc_bus.bdev) {
 		device_delete_child(self, sc->sc_bus.bdev);
