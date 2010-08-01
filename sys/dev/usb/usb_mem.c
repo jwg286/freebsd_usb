@@ -301,6 +301,8 @@ usbmem_driver_load(void)
 
 	if (atomic_cmpset_int(&usbmem_inited, 0, 1))
 		mtx_init(&usbmem_lock, "USBMEM lock", NULL, MTX_DEF);
+	else
+		atomic_add_int(&usbmem_inited, 1);
 }
 
 void
@@ -309,4 +311,6 @@ usbmem_driver_unload(void)
 
 	if (atomic_cmpset_int(&usbmem_inited, 1, 0))
 		mtx_destroy(&usbmem_lock);
+	else
+		atomic_add_int(&usbmem_inited, -1);
 }

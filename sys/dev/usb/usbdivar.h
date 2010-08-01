@@ -175,6 +175,7 @@ struct usbd_pipe {
 	struct usbd_interface  *iface;
 	struct usbd_device     *device;
 	struct usbd_endpoint   *endpoint;
+	struct mtx		mtx;
 	int			refcnt;
 	char			running;
 	char			aborting;
@@ -188,6 +189,13 @@ struct usbd_pipe {
 	/* Filled by HC driver. */
 	struct usbd_pipe_methods *methods;
 };
+
+#define	USBD_PIPE_LOCK_INIT(_pipe)					\
+	mtx_init(&(_pipe)->mtx, "usb pipe lock", NULL, MTX_DEF)
+#define	USBD_PIPE_LOCK_DESTROY(_pipe)	mtx_destroy(&(_pipe)->mtx)
+#define	USBD_PIPE_LOCK(_pipe)		mtx_lock(&(_pipe)->mtx)
+#define	USBD_PIPE_UNLOCK(_pipe)		mtx_unlock(&(_pipe)->mtx)
+#define	USBD_PIPE_LOCK_ASSERT(_pipe)	mtx_assert(&(_pipe)->mtx, MA_OWNED)
 
 #define USB_DMA_NSEG (btoc(MAXPHYS) + 1)
 

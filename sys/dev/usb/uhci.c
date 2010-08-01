@@ -149,6 +149,10 @@ struct uhci_pipe {
 	} u;
 };
 
+static void		uhci_aux_dma_complete(uhci_soft_td_t *, int);
+static usbd_status	uhci_portreset(uhci_softc_t*, int);
+static void		uhci_timeout_task(void *);
+static void		uhci_check_intr(uhci_softc_t *, uhci_intr_info_t *);
 static usbd_status	uhci_run(uhci_softc_t *, int run);
 
 static usbd_status	uhci_allocm(struct usbd_bus *, usb_dma_t *, u_int32_t);
@@ -169,6 +173,55 @@ static void		uhci_dump_all(uhci_softc_t *);
 static void		uhci_dumpregs(uhci_softc_t *);
 static void		uhci_dump_qh(uhci_soft_qh_t *);
 #endif
+
+static usbd_status	uhci_root_ctrl_transfer(usbd_xfer_handle);
+static usbd_status	uhci_root_ctrl_start(usbd_xfer_handle);
+static void		uhci_root_ctrl_abort(usbd_xfer_handle);
+static void		uhci_root_ctrl_close(usbd_pipe_handle);
+static void		uhci_root_ctrl_done(usbd_xfer_handle);
+
+static usbd_status	uhci_root_intr_transfer(usbd_xfer_handle);
+static usbd_status	uhci_root_intr_start(usbd_xfer_handle);
+static void		uhci_root_intr_abort(usbd_xfer_handle);
+static void		uhci_root_intr_close(usbd_pipe_handle);
+static void		uhci_root_intr_done(usbd_xfer_handle);
+
+static usbd_status	uhci_device_ctrl_transfer(usbd_xfer_handle);
+static usbd_status	uhci_device_ctrl_start(usbd_xfer_handle);
+static void		uhci_device_ctrl_abort(usbd_xfer_handle);
+static void		uhci_device_ctrl_close(usbd_pipe_handle);
+static void		uhci_device_ctrl_done(usbd_xfer_handle);
+
+static usbd_status	uhci_device_intr_transfer(usbd_xfer_handle);
+static usbd_status	uhci_device_intr_start(usbd_xfer_handle);
+static void		uhci_device_intr_abort(usbd_xfer_handle);
+static void		uhci_device_intr_close(usbd_pipe_handle);
+static void		uhci_device_intr_done(usbd_xfer_handle);
+
+static usbd_status	uhci_device_isoc_transfer(usbd_xfer_handle);
+static usbd_status	uhci_device_isoc_start(usbd_xfer_handle);
+static void		uhci_device_isoc_abort(usbd_xfer_handle);
+static void		uhci_device_isoc_close(usbd_pipe_handle);
+static void		uhci_device_isoc_done(usbd_xfer_handle);
+
+static usbd_status	uhci_device_bulk_transfer(usbd_xfer_handle);
+static usbd_status	uhci_device_bulk_start(usbd_xfer_handle);
+static void		uhci_device_bulk_abort(usbd_xfer_handle);
+static void		uhci_device_bulk_close(usbd_pipe_handle);
+static void		uhci_device_bulk_done(usbd_xfer_handle);
+
+static usbd_status	uhci_setup_isoc(usbd_pipe_handle pipe);
+
+static void		uhci_device_clear_toggle(usbd_pipe_handle pipe);
+static void		uhci_noop(usbd_pipe_handle pipe);
+
+static usbd_status	uhci_device_setintr(uhci_softc_t *sc,
+			    struct uhci_pipe *pipe, int ival);
+
+static void		uhci_free_sqh(uhci_softc_t *, uhci_soft_qh_t *);
+static void		uhci_free_std(uhci_softc_t *, uhci_soft_td_t *);
+static int		uhci_str(usb_string_descriptor_t *, int, char *);
+static void		uhci_transfer_complete(usbd_xfer_handle xfer);
 
 #define UBARR(sc) bus_space_barrier((sc)->iot, (sc)->ioh, 0, (sc)->sc_size, \
 			BUS_SPACE_BARRIER_READ|BUS_SPACE_BARRIER_WRITE)
@@ -203,6 +256,137 @@ struct usbd_bus_methods uhci_bus_methods = {
 	uhci_allocx,
 	uhci_freex,
 };
+
+struct usbd_pipe_methods uhci_root_ctrl_methods = {
+	uhci_root_ctrl_transfer,
+	uhci_root_ctrl_start,
+	uhci_root_ctrl_abort,
+	uhci_root_ctrl_close,
+	uhci_noop,
+	uhci_root_ctrl_done,
+};
+
+struct usbd_pipe_methods uhci_root_intr_methods = {
+	uhci_root_intr_transfer,
+	uhci_root_intr_start,
+	uhci_root_intr_abort,
+	uhci_root_intr_close,
+	uhci_noop,
+	uhci_root_intr_done,
+};
+
+struct usbd_pipe_methods uhci_device_ctrl_methods = {
+	uhci_device_ctrl_transfer,
+	uhci_device_ctrl_start,
+	uhci_device_ctrl_abort,
+	uhci_device_ctrl_close,
+	uhci_noop,
+	uhci_device_ctrl_done,
+};
+
+struct usbd_pipe_methods uhci_device_intr_methods = {
+	uhci_device_intr_transfer,
+	uhci_device_intr_start,
+	uhci_device_intr_abort,
+	uhci_device_intr_close,
+	uhci_device_clear_toggle,
+	uhci_device_intr_done,
+};
+
+struct usbd_pipe_methods uhci_device_isoc_methods = {
+	uhci_device_isoc_transfer,
+	uhci_device_isoc_start,
+	uhci_device_isoc_abort,
+	uhci_device_isoc_close,
+	uhci_noop,
+	uhci_device_isoc_done,
+};
+
+struct usbd_pipe_methods uhci_device_bulk_methods = {
+	uhci_device_bulk_transfer,
+	uhci_device_bulk_start,
+	uhci_device_bulk_abort,
+	uhci_device_bulk_close,
+	uhci_device_clear_toggle,
+	uhci_device_bulk_done,
+};
+
+/*
+ * Data structures and routines to emulate the root hub.
+ */
+usb_device_descriptor_t uhci_devd = {
+	USB_DEVICE_DESCRIPTOR_SIZE,
+	UDESC_DEVICE,		/* type */
+	{0x00, 0x01},		/* USB version */
+	UDCLASS_HUB,		/* class */
+	UDSUBCLASS_HUB,		/* subclass */
+	UDPROTO_FSHUB,		/* protocol */
+	64,			/* max packet */
+	{0},{0},{0x00,0x01},	/* device id */
+	1,2,0,			/* string indicies */
+	1			/* # of configurations */
+};
+
+usb_config_descriptor_t uhci_confd = {
+	USB_CONFIG_DESCRIPTOR_SIZE,
+	UDESC_CONFIG,
+	{USB_CONFIG_DESCRIPTOR_SIZE +
+	 USB_INTERFACE_DESCRIPTOR_SIZE +
+	 USB_ENDPOINT_DESCRIPTOR_SIZE},
+	1,
+	1,
+	0,
+	UC_SELF_POWERED,
+	0			/* max power */
+};
+
+usb_interface_descriptor_t uhci_ifcd = {
+	USB_INTERFACE_DESCRIPTOR_SIZE,
+	UDESC_INTERFACE,
+	0,
+	0,
+	1,
+	UICLASS_HUB,
+	UISUBCLASS_HUB,
+	UIPROTO_FSHUB,
+	0
+};
+
+usb_endpoint_descriptor_t uhci_endpd = {
+	USB_ENDPOINT_DESCRIPTOR_SIZE,
+	UDESC_ENDPOINT,
+	UE_DIR_IN | UHCI_INTR_ENDPT,
+	UE_INTERRUPT,
+	{8},
+	255
+};
+
+usb_hub_descriptor_t uhci_hubd_piix = {
+	USB_HUB_DESCRIPTOR_SIZE,
+	UDESC_HUB,
+	2,
+	{ UHD_PWR_NO_SWITCH | UHD_OC_INDIVIDUAL, 0 },
+	50,			/* power on to power good */
+	0,
+	{ 0x00 },		/* both ports are removable */
+};
+
+int
+uhci_str(usb_string_descriptor_t *p, int l, char *s)
+{
+	int i;
+
+	if (l == 0)
+		return (0);
+	p->bLength = 2 * strlen(s) + 2;
+	if (l == 1)
+		return (1);
+	p->bDescriptorType = UDESC_STRING;
+	l -= 2;
+	for (i = 0; s[i] && l > 1; i++, l -= 2)
+		USETW2(p->bString[i], 0, s[i]);
+	return (2*i+2);
+}
 
 void
 uhci_reset(uhci_softc_t *sc)
@@ -472,9 +656,32 @@ uhci_alloc_sqh(uhci_softc_t *sc)
 int
 uhci_detach(struct uhci_softc *sc, int flags)
 {
+	usbd_xfer_handle xfer;
+	int rv = 0;
 
-	printf("%s: TODO\n", __func__);
-	return (0);
+	sc->sc_dying = 1;
+
+	UWRITE2(sc, UHCI_INTR, 0);		/* disable interrupts */
+	uhci_run(sc, 0);
+
+#if defined(__NetBSD__) || defined(__OpenBSD__)
+	powerhook_disestablish(sc->sc_powerhook);
+	shutdownhook_disestablish(sc->sc_shutdownhook);
+#endif
+
+	/* Free all xfers associated with this HC. */
+	for (;;) {
+		xfer = STAILQ_FIRST(&sc->sc_free_xfers);
+		if (xfer == NULL)
+			break;
+		STAILQ_REMOVE_HEAD(&sc->sc_free_xfers, next);
+		free(xfer, M_USB);
+	}
+
+	/* XXX free other data structures XXX */
+	usb_freemem(&sc->sc_bus, &sc->sc_dma);
+
+	return (rv);
 }
 
 static int uhci_intr1(uhci_softc_t *);
@@ -689,28 +896,149 @@ uhci_freem(struct usbd_bus *bus, usb_dma_t *dma)
 	usb_freemem(bus, dma);
 }
 
+void
+uhci_timeout_task(void *addr)
+{
+
+	/* XXX locking */
+	TODO();
+}
+
 usbd_xfer_handle
 uhci_allocx(struct usbd_bus *bus)
 {
+	struct uhci_softc *sc = (struct uhci_softc *)bus;
+	usbd_xfer_handle xfer;
 
-	TODO();
-	return (NULL);
+	UHCI_LOCK(sc);
+	xfer = STAILQ_FIRST(&sc->sc_free_xfers);
+	if (xfer != NULL) {
+		STAILQ_REMOVE_HEAD(&sc->sc_free_xfers, next);
+#ifdef DIAGNOSTIC
+		if (xfer->busy_free != XFER_FREE) {
+			printf("uhci_allocx: xfer=%p not free, 0x%08x\n", xfer,
+			       xfer->busy_free);
+		}
+#endif
+	} else {
+		xfer = malloc(sizeof(struct uhci_xfer), M_USB, M_NOWAIT);
+	}
+	if (xfer != NULL) {
+		memset(xfer, 0, sizeof (struct uhci_xfer));
+		UXFER(xfer)->iinfo.sc = sc;
+		usb_init_task(&UXFER(xfer)->abort_task, uhci_timeout_task,
+		    xfer);
+		UXFER(xfer)->uhci_xfer_flags = 0;
+#ifdef DIAGNOSTIC
+		UXFER(xfer)->iinfo.isdone = 1;
+		xfer->busy_free = XFER_BUSY;
+#endif
+	}
+	UHCI_UNLOCK(sc);
+	return (xfer);
 }
 
 void
 uhci_freex(struct usbd_bus *bus, usbd_xfer_handle xfer)
 {
+	struct uhci_softc *sc = (struct uhci_softc *)bus;
 
-	TODO();
+	UHCI_LOCK(sc);
+#ifdef DIAGNOSTIC
+	if (xfer->busy_free != XFER_BUSY) {
+		printf("uhci_freex: xfer=%p not busy, 0x%08x\n", xfer,
+		       xfer->busy_free);
+		UHCI_UNLOCK(sc);
+		return;
+	}
+	xfer->busy_free = XFER_FREE;
+	if (!UXFER(xfer)->iinfo.isdone) {
+		printf("uhci_freex: !isdone\n");
+		UHCI_UNLOCK(sc);
+		return;
+	}
+#endif
+	STAILQ_INSERT_HEAD(&sc->sc_free_xfers, xfer, next);
+	UHCI_UNLOCK(sc);
 }
 
 /* Open a new pipe. */
 usbd_status
 uhci_open(usbd_pipe_handle pipe)
 {
+	uhci_softc_t *sc = (uhci_softc_t *)pipe->device->bus;
+	struct uhci_pipe *upipe = (struct uhci_pipe *)pipe;
+	usb_endpoint_descriptor_t *ed = pipe->endpoint->edesc;
+	usbd_status err;
+	int ival;
 
-	TODO();
-	return (USBD_INVAL);
+	DPRINTFN(1, ("uhci_open: pipe=%p, addr=%d, endpt=%d (%d)\n",
+		     pipe, pipe->device->address,
+		     ed->bEndpointAddress, sc->sc_addr));
+
+	upipe->aborting = 0;
+	upipe->nexttoggle = pipe->endpoint->savedtoggle;
+
+	if (pipe->device->address == sc->sc_addr) {
+		switch (ed->bEndpointAddress) {
+		case USB_CONTROL_ENDPOINT:
+			pipe->methods = &uhci_root_ctrl_methods;
+			break;
+		case UE_DIR_IN | UHCI_INTR_ENDPT:
+			pipe->methods = &uhci_root_intr_methods;
+			break;
+		default:
+			return (USBD_INVAL);
+		}
+	} else {
+		switch (ed->bmAttributes & UE_XFERTYPE) {
+		case UE_CONTROL:
+			pipe->methods = &uhci_device_ctrl_methods;
+			upipe->u.ctl.sqh = uhci_alloc_sqh(sc);
+			if (upipe->u.ctl.sqh == NULL)
+				goto bad;
+			upipe->u.ctl.setup = uhci_alloc_std(sc);
+			if (upipe->u.ctl.setup == NULL) {
+				uhci_free_sqh(sc, upipe->u.ctl.sqh);
+				goto bad;
+			}
+			upipe->u.ctl.stat = uhci_alloc_std(sc);
+			if (upipe->u.ctl.stat == NULL) {
+				uhci_free_sqh(sc, upipe->u.ctl.sqh);
+				uhci_free_std(sc, upipe->u.ctl.setup);
+				goto bad;
+			}
+			err = usb_allocmem(&sc->sc_bus,
+				  sizeof(usb_device_request_t),
+				  0, &upipe->u.ctl.reqdma);
+			if (err) {
+				uhci_free_sqh(sc, upipe->u.ctl.sqh);
+				uhci_free_std(sc, upipe->u.ctl.setup);
+				uhci_free_std(sc, upipe->u.ctl.stat);
+				goto bad;
+			}
+			break;
+		case UE_INTERRUPT:
+			pipe->methods = &uhci_device_intr_methods;
+			ival = pipe->interval;
+			if (ival == USBD_DEFAULT_INTERVAL)
+				ival = ed->bInterval;
+			return (uhci_device_setintr(sc, upipe, ival));
+		case UE_ISOCHRONOUS:
+			pipe->methods = &uhci_device_isoc_methods;
+			return (uhci_setup_isoc(pipe));
+		case UE_BULK:
+			pipe->methods = &uhci_device_bulk_methods;
+			upipe->u.bulk.sqh = uhci_alloc_sqh(sc);
+			if (upipe->u.bulk.sqh == NULL)
+				goto bad;
+			break;
+		}
+	}
+	return (USBD_NORMAL_COMPLETION);
+
+ bad:
+	return (USBD_NOMEM);
 }
 
 void
@@ -722,6 +1050,42 @@ uhci_poll(struct usbd_bus *bus)
 
 void
 uhci_softintr(void *v)
+{
+	uhci_softc_t *sc = v;
+	uhci_intr_info_t *ii, *nextii;
+
+	DPRINTFN(10,("%s: uhci_softintr (%d)\n", device_get_nameunit(sc->sc_bus.bdev),
+		     sc->sc_bus.intr_context));
+
+	sc->sc_bus.intr_context++;
+
+	/*
+	 * Interrupts on UHCI really suck.  When the host controller
+	 * interrupts because a transfer is completed there is no
+	 * way of knowing which transfer it was.  You can scan down
+	 * the TDs and QHs of the previous frame to limit the search,
+	 * but that assumes that the interrupt was not delayed by more
+	 * than 1 ms, which may not always be true (e.g. after debug
+	 * output on a slow console).
+	 * We scan all interrupt descriptors to see if any have
+	 * completed.
+	 */
+	LIST_FOREACH_SAFE(ii, &sc->sc_intrhead, list, nextii)
+		uhci_check_intr(sc, ii);
+
+#ifdef USB_USE_SOFTINTR
+	if (sc->sc_softwake) {
+		sc->sc_softwake = 0;
+		wakeup(&sc->sc_softwake);
+	}
+#endif /* USB_USE_SOFTINTR */
+
+	sc->sc_bus.intr_context--;
+}
+
+/* Check for an interrupt. */
+void
+uhci_check_intr(uhci_softc_t *sc, uhci_intr_info_t *ii)
 {
 
 	TODO();
@@ -740,4 +1104,761 @@ uhci_driver_load(module_t mod, int what, void *arg)
 		break;
 	}
 	return usbd_driver_load(mod, what, 0);
+}
+
+void
+uhci_free_sqh(uhci_softc_t *sc, uhci_soft_qh_t *sqh)
+{
+	sqh->hlink = sc->sc_freeqhs;
+	sc->sc_freeqhs = sqh;
+}
+
+usbd_status
+uhci_device_setintr(uhci_softc_t *sc, struct uhci_pipe *upipe, int ival)
+{
+
+	TODO();
+	return (USBD_INVAL);
+}
+
+/*
+ * Simulate a hardware hub by handling all the necessary requests.
+ */
+usbd_status
+uhci_root_ctrl_transfer(usbd_xfer_handle xfer)
+{
+	usbd_status err;
+
+	/* Insert last in queue. */
+	err = usb_insert_transfer(xfer);
+	if (err)
+		return (err);
+
+	/*
+	 * Pipe isn't running (otherwise err would be USBD_INPROG),
+	 * so start it first.
+	 */
+	return (uhci_root_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue)));
+}
+
+usbd_status
+uhci_root_ctrl_start(usbd_xfer_handle xfer)
+{
+	uhci_softc_t *sc = (uhci_softc_t *)xfer->pipe->device->bus;
+	usb_device_request_t *req;
+	void *buf = NULL;
+	int port, x;
+	int len, value, index, status, change, l, totlen = 0;
+	usb_port_status_t ps;
+	usbd_status err;
+
+	if (sc->sc_dying)
+		return (USBD_IOERROR);
+
+#ifdef DIAGNOSTIC
+	if (!(xfer->rqflags & URQ_REQUEST))
+		panic("uhci_root_ctrl_transfer: not a request");
+#endif
+	req = &xfer->request;
+
+	DPRINTFN(2,("uhci_root_ctrl_control type=0x%02x request=%02x\n",
+		    req->bmRequestType, req->bRequest));
+
+	len = UGETW(req->wLength);
+	value = UGETW(req->wValue);
+	index = UGETW(req->wIndex);
+
+	if (len != 0)
+		buf = xfer->buffer;
+
+#define C(x,y) ((x) | ((y) << 8))
+	switch(C(req->bRequest, req->bmRequestType)) {
+	case C(UR_CLEAR_FEATURE, UT_WRITE_DEVICE):
+	case C(UR_CLEAR_FEATURE, UT_WRITE_INTERFACE):
+	case C(UR_CLEAR_FEATURE, UT_WRITE_ENDPOINT):
+		/*
+		 * DEVICE_REMOTE_WAKEUP and ENDPOINT_HALT are no-ops
+		 * for the integrated root hub.
+		 */
+		break;
+	case C(UR_GET_CONFIG, UT_READ_DEVICE):
+		if (len > 0) {
+			*(u_int8_t *)buf = sc->sc_conf;
+			totlen = 1;
+		}
+		break;
+	case C(UR_GET_DESCRIPTOR, UT_READ_DEVICE):
+		DPRINTFN(2,("uhci_root_ctrl_control wValue=0x%04x\n", value));
+		switch(value >> 8) {
+		case UDESC_DEVICE:
+			if ((value & 0xff) != 0) {
+				err = USBD_IOERROR;
+				goto ret;
+			}
+			totlen = l = min(len, USB_DEVICE_DESCRIPTOR_SIZE);
+			USETW(uhci_devd.idVendor, sc->sc_id_vendor);
+			memcpy(buf, &uhci_devd, l);
+			break;
+		case UDESC_CONFIG:
+			if ((value & 0xff) != 0) {
+				err = USBD_IOERROR;
+				goto ret;
+			}
+			totlen = l = min(len, USB_CONFIG_DESCRIPTOR_SIZE);
+			memcpy(buf, &uhci_confd, l);
+			buf = (char *)buf + l;
+			len -= l;
+			l = min(len, USB_INTERFACE_DESCRIPTOR_SIZE);
+			totlen += l;
+			memcpy(buf, &uhci_ifcd, l);
+			buf = (char *)buf + l;
+			len -= l;
+			l = min(len, USB_ENDPOINT_DESCRIPTOR_SIZE);
+			totlen += l;
+			memcpy(buf, &uhci_endpd, l);
+			break;
+		case UDESC_STRING:
+			if (len == 0)
+				break;
+			*(u_int8_t *)buf = 0;
+			totlen = 1;
+			switch (value & 0xff) {
+			case 1: /* Vendor */
+				totlen = uhci_str(buf, len, sc->sc_vendor);
+				break;
+			case 2: /* Product */
+				totlen = uhci_str(buf, len, "UHCI root hub");
+				break;
+			}
+			break;
+		default:
+			err = USBD_IOERROR;
+			goto ret;
+		}
+		break;
+	case C(UR_GET_INTERFACE, UT_READ_INTERFACE):
+		if (len > 0) {
+			*(u_int8_t *)buf = 0;
+			totlen = 1;
+		}
+		break;
+	case C(UR_GET_STATUS, UT_READ_DEVICE):
+		if (len > 1) {
+			USETW(((usb_status_t *)buf)->wStatus,UDS_SELF_POWERED);
+			totlen = 2;
+		}
+		break;
+	case C(UR_GET_STATUS, UT_READ_INTERFACE):
+	case C(UR_GET_STATUS, UT_READ_ENDPOINT):
+		if (len > 1) {
+			USETW(((usb_status_t *)buf)->wStatus, 0);
+			totlen = 2;
+		}
+		break;
+	case C(UR_SET_ADDRESS, UT_WRITE_DEVICE):
+		if (value >= USB_MAX_DEVICES) {
+			err = USBD_IOERROR;
+			goto ret;
+		}
+		sc->sc_addr = value;
+		break;
+	case C(UR_SET_CONFIG, UT_WRITE_DEVICE):
+		if (value != 0 && value != 1) {
+			err = USBD_IOERROR;
+			goto ret;
+		}
+		sc->sc_conf = value;
+		break;
+	case C(UR_SET_DESCRIPTOR, UT_WRITE_DEVICE):
+		break;
+	case C(UR_SET_FEATURE, UT_WRITE_DEVICE):
+	case C(UR_SET_FEATURE, UT_WRITE_INTERFACE):
+	case C(UR_SET_FEATURE, UT_WRITE_ENDPOINT):
+		err = USBD_IOERROR;
+		goto ret;
+	case C(UR_SET_INTERFACE, UT_WRITE_INTERFACE):
+		break;
+	case C(UR_SYNCH_FRAME, UT_WRITE_ENDPOINT):
+		break;
+	/* Hub requests */
+	case C(UR_CLEAR_FEATURE, UT_WRITE_CLASS_DEVICE):
+		break;
+	case C(UR_CLEAR_FEATURE, UT_WRITE_CLASS_OTHER):
+		DPRINTFN(3, ("uhci_root_ctrl_control: UR_CLEAR_PORT_FEATURE "
+			     "port=%d feature=%d\n",
+			     index, value));
+		if (index == 1)
+			port = UHCI_PORTSC1;
+		else if (index == 2)
+			port = UHCI_PORTSC2;
+		else {
+			err = USBD_IOERROR;
+			goto ret;
+		}
+		switch(value) {
+		case UHF_PORT_ENABLE:
+			x = URWMASK(UREAD2(sc, port));
+			UWRITE2(sc, port, x & ~UHCI_PORTSC_PE);
+			break;
+		case UHF_PORT_SUSPEND:
+			x = URWMASK(UREAD2(sc, port));
+			UWRITE2(sc, port, x & ~UHCI_PORTSC_SUSP);
+			break;
+		case UHF_PORT_RESET:
+			x = URWMASK(UREAD2(sc, port));
+			UWRITE2(sc, port, x & ~UHCI_PORTSC_PR);
+			break;
+		case UHF_C_PORT_CONNECTION:
+			x = URWMASK(UREAD2(sc, port));
+			UWRITE2(sc, port, x | UHCI_PORTSC_CSC);
+			break;
+		case UHF_C_PORT_ENABLE:
+			x = URWMASK(UREAD2(sc, port));
+			UWRITE2(sc, port, x | UHCI_PORTSC_POEDC);
+			break;
+		case UHF_C_PORT_OVER_CURRENT:
+			x = URWMASK(UREAD2(sc, port));
+			UWRITE2(sc, port, x | UHCI_PORTSC_OCIC);
+			break;
+		case UHF_C_PORT_RESET:
+			sc->sc_isreset = 0;
+			err = USBD_NORMAL_COMPLETION;
+			goto ret;
+		case UHF_PORT_CONNECTION:
+		case UHF_PORT_OVER_CURRENT:
+		case UHF_PORT_POWER:
+		case UHF_PORT_LOW_SPEED:
+		case UHF_C_PORT_SUSPEND:
+		default:
+			err = USBD_IOERROR;
+			goto ret;
+		}
+		break;
+	case C(UR_GET_BUS_STATE, UT_READ_CLASS_OTHER):
+		if (index == 1)
+			port = UHCI_PORTSC1;
+		else if (index == 2)
+			port = UHCI_PORTSC2;
+		else {
+			err = USBD_IOERROR;
+			goto ret;
+		}
+		if (len > 0) {
+			*(u_int8_t *)buf =
+				(UREAD2(sc, port) & UHCI_PORTSC_LS) >>
+				UHCI_PORTSC_LS_SHIFT;
+			totlen = 1;
+		}
+		break;
+	case C(UR_GET_DESCRIPTOR, UT_READ_CLASS_DEVICE):
+		if ((value & 0xff) != 0) {
+			err = USBD_IOERROR;
+			goto ret;
+		}
+		l = min(len, USB_HUB_DESCRIPTOR_SIZE);
+		totlen = l;
+		memcpy(buf, &uhci_hubd_piix, l);
+		break;
+	case C(UR_GET_STATUS, UT_READ_CLASS_DEVICE):
+		if (len != 4) {
+			err = USBD_IOERROR;
+			goto ret;
+		}
+		memset(buf, 0, len);
+		totlen = len;
+		break;
+	case C(UR_GET_STATUS, UT_READ_CLASS_OTHER):
+		if (index == 1)
+			port = UHCI_PORTSC1;
+		else if (index == 2)
+			port = UHCI_PORTSC2;
+		else {
+			err = USBD_IOERROR;
+			goto ret;
+		}
+		if (len != 4) {
+			err = USBD_IOERROR;
+			goto ret;
+		}
+		x = UREAD2(sc, port);
+		status = change = 0;
+		if (x & UHCI_PORTSC_CCS)
+			status |= UPS_CURRENT_CONNECT_STATUS;
+		if (x & UHCI_PORTSC_CSC)
+			change |= UPS_C_CONNECT_STATUS;
+		if (x & UHCI_PORTSC_PE)
+			status |= UPS_PORT_ENABLED;
+		if (x & UHCI_PORTSC_POEDC)
+			change |= UPS_C_PORT_ENABLED;
+		if (x & UHCI_PORTSC_OCI)
+			status |= UPS_OVERCURRENT_INDICATOR;
+		if (x & UHCI_PORTSC_OCIC)
+			change |= UPS_C_OVERCURRENT_INDICATOR;
+		if (x & UHCI_PORTSC_SUSP)
+			status |= UPS_SUSPEND;
+		if (x & UHCI_PORTSC_LSDA)
+			status |= UPS_LOW_SPEED;
+		status |= UPS_PORT_POWER;
+		if (sc->sc_isreset)
+			change |= UPS_C_PORT_RESET;
+		USETW(ps.wPortStatus, status);
+		USETW(ps.wPortChange, change);
+		l = min(len, sizeof ps);
+		memcpy(buf, &ps, l);
+		totlen = l;
+		break;
+	case C(UR_SET_DESCRIPTOR, UT_WRITE_CLASS_DEVICE):
+		err = USBD_IOERROR;
+		goto ret;
+	case C(UR_SET_FEATURE, UT_WRITE_CLASS_DEVICE):
+		break;
+	case C(UR_SET_FEATURE, UT_WRITE_CLASS_OTHER):
+		if (index == 1)
+			port = UHCI_PORTSC1;
+		else if (index == 2)
+			port = UHCI_PORTSC2;
+		else {
+			err = USBD_IOERROR;
+			goto ret;
+		}
+		switch(value) {
+		case UHF_PORT_ENABLE:
+			x = URWMASK(UREAD2(sc, port));
+			UWRITE2(sc, port, x | UHCI_PORTSC_PE);
+			break;
+		case UHF_PORT_SUSPEND:
+			x = URWMASK(UREAD2(sc, port));
+			UWRITE2(sc, port, x | UHCI_PORTSC_SUSP);
+			break;
+		case UHF_PORT_RESET:
+			err = uhci_portreset(sc, index);
+			goto ret;
+		case UHF_PORT_POWER:
+			/* Pretend we turned on power */
+			err = USBD_NORMAL_COMPLETION;
+			goto ret;
+		case UHF_C_PORT_CONNECTION:
+		case UHF_C_PORT_ENABLE:
+		case UHF_C_PORT_OVER_CURRENT:
+		case UHF_PORT_CONNECTION:
+		case UHF_PORT_OVER_CURRENT:
+		case UHF_PORT_LOW_SPEED:
+		case UHF_C_PORT_SUSPEND:
+		case UHF_C_PORT_RESET:
+		default:
+			err = USBD_IOERROR;
+			goto ret;
+		}
+		break;
+	default:
+		err = USBD_IOERROR;
+		goto ret;
+	}
+	xfer->actlen = totlen;
+	err = USBD_NORMAL_COMPLETION;
+ ret:
+	xfer->status = err;
+	uhci_transfer_complete(xfer);
+	return (USBD_IN_PROGRESS);
+}
+
+/* Abort a root control request. */
+void
+uhci_root_ctrl_abort(usbd_xfer_handle xfer)
+{
+	/* Nothing to do, all transfers are synchronous. */
+}
+
+/* Close the root pipe. */
+void
+uhci_root_ctrl_close(usbd_pipe_handle pipe)
+{
+	DPRINTF(("uhci_root_ctrl_close\n"));
+}
+
+void
+uhci_root_ctrl_done(usbd_xfer_handle xfer)
+{
+
+	/* do nothing */
+}
+
+usbd_status
+uhci_root_intr_transfer(usbd_xfer_handle xfer)
+{
+
+	TODO();
+	return (USBD_INVAL);
+}
+
+/* Start a transfer on the root interrupt pipe */
+usbd_status
+uhci_root_intr_start(usbd_xfer_handle xfer)
+{
+
+	TODO();
+	return (USBD_INVAL);
+}
+
+/* Close the root interrupt pipe. */
+void
+uhci_root_intr_close(usbd_pipe_handle pipe)
+{
+
+	TODO();
+}
+
+/* Abort a root interrupt request. */
+void
+uhci_root_intr_abort(usbd_xfer_handle xfer)
+{
+
+	TODO();
+}
+
+void
+uhci_root_intr_done(usbd_xfer_handle xfer)
+{
+
+	TODO();
+}
+
+usbd_status
+uhci_device_ctrl_transfer(usbd_xfer_handle xfer)
+{
+
+	TODO();
+	return (USBD_INVAL);
+}
+
+usbd_status
+uhci_device_ctrl_start(usbd_xfer_handle xfer)
+{
+
+	TODO();
+	return (USBD_INVAL);
+}
+
+/* Abort a device control request. */
+void
+uhci_device_ctrl_abort(usbd_xfer_handle xfer)
+{
+
+	TODO();
+}
+
+/* Close a device control pipe. */
+void
+uhci_device_ctrl_close(usbd_pipe_handle pipe)
+{
+}
+
+/* Deallocate request data structures */
+void
+uhci_device_ctrl_done(usbd_xfer_handle xfer)
+{
+
+	TODO();
+}
+
+usbd_status
+uhci_device_intr_transfer(usbd_xfer_handle xfer)
+{
+
+	TODO();
+	return (USBD_INVAL);
+}
+
+usbd_status
+uhci_device_intr_start(usbd_xfer_handle xfer)
+{
+
+	TODO();
+	return (USBD_INVAL);
+}
+
+/* Abort a device interrupt request. */
+void
+uhci_device_intr_abort(usbd_xfer_handle xfer)
+{
+
+	TODO();
+}
+
+/* Close a device interrupt pipe. */
+void
+uhci_device_intr_close(usbd_pipe_handle pipe)
+{
+
+	TODO();
+}
+
+void
+uhci_device_intr_done(usbd_xfer_handle xfer)
+{
+
+	TODO();
+}
+
+usbd_status
+uhci_device_isoc_transfer(usbd_xfer_handle xfer)
+{
+
+	TODO();
+	return (USBD_INVAL);
+}
+
+usbd_status
+uhci_device_isoc_start(usbd_xfer_handle xfer)
+{
+
+	TODO();
+	return (USBD_INVAL);
+}
+
+void
+uhci_device_isoc_abort(usbd_xfer_handle xfer)
+{
+
+	TODO();
+}
+
+void
+uhci_device_isoc_close(usbd_pipe_handle pipe)
+{
+
+	TODO();
+}
+
+void
+uhci_device_isoc_done(usbd_xfer_handle xfer)
+{
+
+	TODO();
+}
+
+usbd_status
+uhci_device_bulk_transfer(usbd_xfer_handle xfer)
+{
+
+	TODO();
+	return (USBD_INVAL);
+}
+
+usbd_status
+uhci_device_bulk_start(usbd_xfer_handle xfer)
+{
+
+	TODO();
+	return (USBD_INVAL);
+}
+
+/* Abort a device bulk request. */
+void
+uhci_device_bulk_abort(usbd_xfer_handle xfer)
+{
+
+	TODO();
+}
+
+/* Close a device bulk pipe. */
+void
+uhci_device_bulk_close(usbd_pipe_handle pipe)
+{
+
+	TODO();
+}
+
+/* Deallocate request data structures */
+void
+uhci_device_bulk_done(usbd_xfer_handle xfer)
+{
+
+	TODO();
+}
+
+usbd_status
+uhci_setup_isoc(usbd_pipe_handle pipe)
+{
+
+	TODO();
+	return (USBD_INVAL);
+}
+
+void
+uhci_device_clear_toggle(usbd_pipe_handle pipe)
+{
+	struct uhci_pipe *upipe = (struct uhci_pipe *)pipe;
+	upipe->nexttoggle = 0;
+}
+
+void
+uhci_noop(usbd_pipe_handle pipe)
+{
+}
+
+void
+uhci_free_std(uhci_softc_t *sc, uhci_soft_td_t *std)
+{
+#ifdef DIAGNOSTIC
+#define TD_IS_FREE 0x12345678
+	if (le32toh(std->td.td_token) == TD_IS_FREE) {
+		printf("uhci_free_std: freeing free TD %p\n", std);
+		return;
+	}
+	std->td.td_token = htole32(TD_IS_FREE);
+#endif
+	if (std->aux_dma.block != NULL) {
+		usb_freemem(&sc->sc_bus, &std->aux_dma);
+		std->aux_dma.block = NULL;
+		std->aux_data = NULL;
+		std->aux_len = 0;
+	}
+	std->link.std = sc->sc_freetds;
+	sc->sc_freetds = std;
+}
+
+/*
+ * The USB hub protocol requires that SET_FEATURE(PORT_RESET) also
+ * enables the port, and also states that SET_FEATURE(PORT_ENABLE)
+ * should not be used by the USB subsystem.  As we cannot issue a
+ * SET_FEATURE(PORT_ENABLE) externally, we must ensure that the port
+ * will be enabled as part of the reset.
+ *
+ * On the VT83C572, the port cannot be successfully enabled until the
+ * outstanding "port enable change" and "connection status change"
+ * events have been reset.
+ */
+static usbd_status
+uhci_portreset(uhci_softc_t *sc, int index)
+{
+	int lim, port, x;
+
+	if (index == 1)
+		port = UHCI_PORTSC1;
+	else if (index == 2)
+		port = UHCI_PORTSC2;
+	else
+		return (USBD_IOERROR);
+
+	x = URWMASK(UREAD2(sc, port));
+	UWRITE2(sc, port, x | UHCI_PORTSC_PR);
+
+	usb_delay_ms(&sc->sc_bus, USB_PORT_ROOT_RESET_DELAY);
+
+	DPRINTFN(3,("uhci port %d reset, status0 = 0x%04x\n",
+		    index, UREAD2(sc, port)));
+
+	x = URWMASK(UREAD2(sc, port));
+	UWRITE2(sc, port, x & ~UHCI_PORTSC_PR);
+
+	delay(100);
+
+	DPRINTFN(3,("uhci port %d reset, status1 = 0x%04x\n",
+		    index, UREAD2(sc, port)));
+
+	x = URWMASK(UREAD2(sc, port));
+	UWRITE2(sc, port, x  | UHCI_PORTSC_PE);
+
+	for (lim = 10; --lim > 0;) {
+		usb_delay_ms(&sc->sc_bus, USB_PORT_RESET_DELAY);
+
+		x = UREAD2(sc, port);
+
+		DPRINTFN(3,("uhci port %d iteration %u, status = 0x%04x\n",
+			    index, lim, x));
+
+		if (!(x & UHCI_PORTSC_CCS)) {
+			/*
+			 * No device is connected (or was disconnected
+			 * during reset).  Consider the port reset.
+			 * The delay must be long enough to ensure on
+			 * the initial iteration that the device
+			 * connection will have been registered.  50ms
+			 * appears to be sufficient, but 20ms is not.
+			 */
+			DPRINTFN(3,("uhci port %d loop %u, device detached\n",
+				    index, lim));
+			break;
+		}
+
+		if (x & (UHCI_PORTSC_POEDC | UHCI_PORTSC_CSC)) {
+			/*
+			 * Port enabled changed and/or connection
+			 * status changed were set.  Reset either or
+			 * both raised flags (by writing a 1 to that
+			 * bit), and wait again for state to settle.
+			 */
+			UWRITE2(sc, port, URWMASK(x) |
+				(x & (UHCI_PORTSC_POEDC | UHCI_PORTSC_CSC)));
+			continue;
+		}
+
+		if (x & UHCI_PORTSC_PE)
+			/* Port is enabled */
+			break;
+
+		UWRITE2(sc, port, URWMASK(x) | UHCI_PORTSC_PE);
+	}
+
+	DPRINTFN(3,("uhci port %d reset, status2 = 0x%04x\n",
+		    index, UREAD2(sc, port)));
+
+	if (lim <= 0) {
+		DPRINTFN(1,("uhci port %d reset timed out\n", index));
+		return (USBD_TIMEOUT);
+	}
+
+	sc->sc_isreset = 1;
+	return (USBD_NORMAL_COMPLETION);
+}
+
+/*
+ * Perform any UHCI-specific transfer completion operations, then
+ * call usb_transfer_complete().
+ */
+static void
+uhci_transfer_complete(usbd_xfer_handle xfer)
+{
+	uhci_intr_info_t *ii = &UXFER(xfer)->iinfo;
+	struct uhci_pipe *upipe = (struct uhci_pipe *)xfer->pipe;
+	uhci_soft_td_t *p;
+	int i, isread, n;
+
+	/* XXX, must be an easier way to detect reads... */
+	isread = ((xfer->rqflags & URQ_REQUEST) &&
+	    (xfer->request.bmRequestType & UT_READ)) ||
+            (xfer->pipe->endpoint->edesc->bEndpointAddress & UE_DIR_IN);
+
+	/* Copy back from any auxillary buffers after a read operation. */
+	if (xfer->nframes == 0) {
+		for (p = ii->stdstart; p != NULL; p = p->link.std) {
+			if (p->aux_data != NULL)
+				uhci_aux_dma_complete(p, isread);
+		}
+	} else {
+		if (xfer->nframes != 0) {
+			/* Isoc transfer, do things differently. */
+			n = UXFER(xfer)->curframe;
+			for (i = 0; i < xfer->nframes; i++) {
+				p = upipe->u.iso.stds[n];
+				if (p->aux_data != NULL)
+					uhci_aux_dma_complete(p, isread);
+				if (++n >= UHCI_VFRAMELIST_COUNT)
+				n = 0;
+			}
+		}
+	}
+
+	usb_transfer_complete(xfer);
+}
+
+static void
+uhci_aux_dma_complete(uhci_soft_td_t *std, int isread)
+{
+	if (isread) {
+		bus_dmamap_sync(std->aux_dma.block->tag,
+		    std->aux_dma.block->map, BUS_DMASYNC_POSTREAD);
+		bcopy(KERNADDR(&std->aux_dma, 0), std->aux_data, std->aux_len);
+	}
 }
