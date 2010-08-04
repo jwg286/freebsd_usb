@@ -703,4 +703,5 @@ struct usb_event {
 #define USB_GET_CM_OVER_DATA	_IOR ('U', 130, int)
 #define USB_SET_CM_OVER_DATA	_IOW ('U', 131, int)
 
+#define	TODO()			printf("%s: TODO\n", __func__)
 #endif /* _USB_H_ */

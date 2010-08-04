@@ -78,7 +78,8 @@ __FBSDID("$FreeBSD: stable/7/sys/dev/usb/usb.c 170960 2007-06-20 05:11:37Z imp $
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdi_util.h>
 
-#define USBUNIT(d)	(minor(d))	/* usb_discover device nodes, kthread */
+/* usb_discover device nodes, kthread */
+#define USBUNIT(d)	(dev2unit(d) & 0xff)
 #define USB_DEV_MINOR	255		/* event queue device */
 
 MALLOC_DEFINE(M_USB, "USB", "USB");
@@ -338,7 +339,7 @@ usb_create_event_thread(void *arg)
 	struct usb_taskq *taskq;
 	int i;
 
-	if (kthread_create(usb_event_thread, sc, &sc->sc_event_thread,
+	if (kproc_create(usb_event_thread, sc, &sc->sc_event_thread,
 	      RFHIGHPID, 0, device_get_nameunit(sc->sc_dev))) {
 		printf("%s: unable to create event thread for\n",
 		       device_get_nameunit(sc->sc_dev));
@@ -351,7 +352,7 @@ usb_create_event_thread(void *arg)
 			taskq->taskcreated = 1;
 			taskq->name = taskq_names[i];
 			TAILQ_INIT(&taskq->tasks);
-			if (kthread_create(usb_task_thread, taskq,
+			if (kproc_create(usb_task_thread, taskq,
 			    &taskq->task_thread_proc, RFHIGHPID, 0,
 			    taskq->name)) {
 				printf("unable to create task thread\n");
@@ -453,7 +454,7 @@ usb_event_thread(void *arg)
 	wakeup(sc);
 
 	DPRINTF(("usb_event_thread: exit\n"));
-	kthread_exit(0);
+	kproc_exit(0);
 }
 
 void
@@ -490,7 +491,7 @@ usb_task_thread(void *arg)
 	wakeup(&taskq->taskcreated);
 
 	DPRINTF(("usb_event_thread: exit\n"));
-	kthread_exit(0);
+	kproc_exit(0);
 }
 
 int

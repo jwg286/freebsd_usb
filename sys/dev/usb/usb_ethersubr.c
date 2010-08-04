@@ -73,8 +73,11 @@ static struct ifqueue usbq_rx;
 static struct ifqueue usbq_tx;
 static int mtx_inited = 0;
 
+#if 0
 static void usbintr		(void);
+#endif
 
+#if 0
 static void
 usbintr(void)
 {
@@ -111,13 +114,17 @@ usbintr(void)
 
 	return;
 }
+#endif
 
 void
 usb_register_netisr(void)
 {
 	if (mtx_inited)
 		return;
+	TODO();
+#if 0
 	netisr_register(NETISR_USB, (netisr_t *)usbintr, NULL, 0);
+#endif
 	mtx_init(&usbq_tx.ifq_mtx, "usbq_tx_mtx", NULL, MTX_DEF);
 	mtx_init(&usbq_rx.ifq_mtx, "usbq_rx_mtx", NULL, MTX_DEF);
 	mtx_inited++;
@@ -133,8 +140,10 @@ usb_ether_input(m)
 	struct mbuf		*m;
 {
 	IF_ENQUEUE(&usbq_rx, m);
+	TODO();
+#if 0
 	schednetisr(NETISR_USB);
-
+#endif
 	return;
 }
 
@@ -143,8 +152,10 @@ usb_tx_done(m)
 	struct mbuf		*m;
 {
 	IF_ENQUEUE(&usbq_tx, m);
+	TODO();
+#if 0
 	schednetisr(NETISR_USB);
-
+#endif
 	return;
 }
 
