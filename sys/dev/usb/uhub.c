@@ -369,6 +369,186 @@ uhub_attach(device_t self)
 	return (ENXIO);
 }
 
+usbd_status
+uhub_explore(usbd_device_handle dev)
+{
+	usb_hub_descriptor_t *hd = &dev->hub->hubdesc;
+	struct uhub_softc *sc = dev->hub->hubsoftc;
+	struct usbd_port *up;
+	usbd_status err;
+	int speed;
+	int port;
+	int change, status;
+
+	DPRINTFN(10, ("uhub_explore dev=%p addr=%d\n", dev, dev->address));
+
+	if (!sc->sc_running)
+		return (USBD_NOT_STARTED);
+
+	/* Ignore hubs that are too deep. */
+	if (dev->depth > USB_HUB_MAX_DEPTH)
+		return (USBD_TOO_DEEP);
+
+	for(port = 1; port <= hd->bNbrPorts; port++) {
+		up = &dev->hub->ports[port-1];
+		err = usbd_get_port_status(dev, port, &up->status);
+		if (err) {
+			DPRINTF(("uhub_explore: get port status failed, "
+				 "error=%s\n", usbd_errstr(err)));
+			continue;
+		}
+		status = UGETW(up->status.wPortStatus);
+		change = UGETW(up->status.wPortChange);
+		DEVPRINTFN(3,(sc->sc_dev,
+		    "uhub_explore: port %d status 0x%04x 0x%04x\n", port,
+		    status, change));
+		if (change & UPS_C_PORT_ENABLED) {
+			DPRINTF(("uhub_explore: C_PORT_ENABLED 0x%x\n", change));
+			usbd_clear_port_feature(dev, port, UHF_C_PORT_ENABLE);
+			if (change & UPS_C_CONNECT_STATUS) {
+				/* Ignore the port error if the device
+				   vanished. */
+			} else if (status & UPS_PORT_ENABLED) {
+				device_printf(sc->sc_dev,
+				    "illegal enable change, port %d\n", port);
+			} else {
+				/* Port error condition. */
+				if (up->restartcnt) /* no message first time */
+					device_printf(sc->sc_dev,
+					    "port error, restarting port %d\n",
+					    port);
+
+				if (up->restartcnt++ < USBD_RESTART_MAX)
+					goto disco;
+				else
+					device_printf(sc->sc_dev,
+					    "port error, giving up port %d\n",
+					    port);
+			}
+		}
+		if (!(change & UPS_C_CONNECT_STATUS)) {
+			DPRINTFN(3,("uhub_explore: port=%d !C_CONNECT_"
+				    "STATUS\n", port));
+			/* No status change, just do recursive explore. */
+			if (up->device != NULL && up->device->hub != NULL)
+				up->device->hub->explore(up->device);
+#if 0 && defined(DIAGNOSTIC)
+			if (up->device == NULL &&
+			    (status & UPS_CURRENT_CONNECT_STATUS))
+				deivce_printf(sc->sc_dev,
+				    "connected, no device\n");
+#endif
+			continue;
+		}
+
+		/* We have a connect status change, handle it. */
+
+		DPRINTF(("uhub_explore: status change hub=%d port=%d\n",
+			 dev->address, port));
+		usbd_clear_port_feature(dev, port, UHF_C_PORT_CONNECTION);
+		/*usbd_clear_port_feature(dev, port, UHF_C_PORT_ENABLE);*/
+		/*
+		 * If there is already a device on the port the change status
+		 * must mean that is has disconnected.  Looking at the
+		 * current connect status is not enough to figure this out
+		 * since a new unit may have been connected before we handle
+		 * the disconnect.
+		 */
+	disco:
+		if (up->device != NULL) {
+			/* Disconnected */
+			DPRINTF(("uhub_explore: device addr=%d disappeared "
+				 "on port %d\n", up->device->address, port));
+			usb_disconnect_port(up, sc->sc_dev);
+			usbd_clear_port_feature(dev, port,
+						UHF_C_PORT_CONNECTION);
+		}
+		if (!(status & UPS_CURRENT_CONNECT_STATUS)) {
+			/* Nothing connected, just ignore it. */
+			DPRINTFN(3,("uhub_explore: port=%d !CURRENT_CONNECT"
+				    "_STATUS\n", port));
+			continue;
+		}
+
+		/* Connected */
+
+		if (!(status & UPS_PORT_POWER))
+			device_printf(sc->sc_dev,
+			    "strange, connected port %d has no power\n", port);
+
+		/* Wait for maximum device power up time. */
+		usbd_delay_ms(dev, USB_PORT_POWERUP_DELAY);
+
+		/* Reset port, which implies enabling it. */
+		if (usbd_reset_port(dev, port, &up->status)) {
+			device_printf(sc->sc_dev, "port %d reset failed\n",
+			    port);
+			continue;
+		}
+		/* Get port status again, it might have changed during reset */
+		err = usbd_get_port_status(dev, port, &up->status);
+		if (err) {
+			DPRINTF(("uhub_explore: get port status failed, "
+				 "error=%s\n", usbd_errstr(err)));
+			continue;
+		}
+		status = UGETW(up->status.wPortStatus);
+		change = UGETW(up->status.wPortChange);
+		if (!(status & UPS_CURRENT_CONNECT_STATUS)) {
+			/* Nothing connected, just ignore it. */
+#ifdef DIAGNOSTIC
+			device_printf(sc->sc_dev,
+			    "port %d, device disappeared after reset\n", port);
+#endif
+			continue;
+		}
+
+#if 0
+		if (UHUB_IS_HIGH_SPEED(sc) && !(status & UPS_HIGH_SPEED)) {
+			device_printf(sc->sc_dev,
+			    "port %d, transaction translation not implemented,"
+			    " low/full speed device ignored\n", port);
+			continue;
+		}
+#endif
+
+		/* Figure out device speed */
+		if (status & UPS_HIGH_SPEED)
+			speed = USB_SPEED_HIGH;
+		else if (status & UPS_LOW_SPEED)
+			speed = USB_SPEED_LOW;
+		else
+			speed = USB_SPEED_FULL;
+		/* Get device info and set its address. */
+		err = usbd_new_device(sc->sc_dev, dev->bus,
+		    dev->depth + 1, speed, port, up);
+		/* XXX retry a few times? */
+		if (err) {
+			DPRINTFN(-1,("uhub_explore: usb_new_device failed, "
+				     "error=%s\n", usbd_errstr(err)));
+			/* Avoid addressing problems by disabling. */
+			/* usbd_reset_port(dev, port, &up->status); */
+
+			/*
+			 * The unit refused to accept a new address, or had
+			 * some other serious problem.  Since we cannot leave
+			 * at 0 we have to disable the port instead.
+			 */
+			device_printf(sc->sc_dev,
+			    "device problem (%s), disabling port %d\n",
+			    usbd_errstr(err), port);
+			usbd_clear_port_feature(dev, port, UHF_PORT_ENABLE);
+		} else {
+			/* The port set up succeeded, reset error count. */
+			up->restartcnt = 0;
+
+			if (up->device->hub)
+				up->device->hub->explore(up->device);
+		}
+	}
+	return (USBD_NORMAL_COMPLETION);
+}
+
 /*
  * Called from process context when the hub is gone.
  * Detach all devices on active ports.
@@ -416,7 +596,6 @@ uhub_child_location_str(device_t cbdev, device_t child, char *buf,
 	int port;
 	int i;
 
-	TODO();
 	mtx_lock(&Giant);
 	nports = devhub->hub->hubdesc.bNbrPorts;
 	for (port = 0; port < nports; port++) {
@@ -457,7 +636,6 @@ uhub_child_pnpinfo_str(device_t cbdev, device_t child, char *buf,
 	int port;
 	int i;
 
-	TODO();
 	mtx_lock(&Giant);
 	nports = devhub->hub->hubdesc.bNbrPorts;
 	for (port = 0; port < nports; port++) {
@@ -500,14 +678,6 @@ found_dev:
 	}
 	mtx_unlock(&Giant);
 	return (0);
-}
-
-usbd_status
-uhub_explore(usbd_device_handle dev)
-{
-
-	TODO();
-	return (USBD_INVAL);
 }
 
 /*

@@ -142,9 +142,6 @@ struct uhci_vframe {
 
 typedef struct uhci_softc {
 	struct usbd_bus sc_bus;		/* base device */
-	struct mtx sc_mtx;
-	struct taskqueue *sc_tq;	/* private task queue */
-	struct task sc_resettask;
 	int sc_flags;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
@@ -201,17 +198,9 @@ typedef struct uhci_softc {
 #endif
 } uhci_softc_t;
 
-#define	UHCI_LOCK_INIT(_sc)						\
-	mtx_init(&(_sc)->sc_mtx, device_get_nameunit((_sc)->sc_bus.bdev), \
-	    NULL, MTX_DEF)
-#define	UHCI_LOCK_DESTROY(_sc)		mtx_destroy(&(_sc)->sc_mtx)
-#define	UHCI_LOCK(_sc)			mtx_lock(&(_sc)->sc_mtx)
-#define	UHCI_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
-#define	UHCI_LOCK_ASSERT(_sc)		mtx_assert(&(_sc)->sc_mtx, MA_OWNED)
-
 usbd_status	uhci_init(uhci_softc_t *);
 int		uhci_intr(void *);
 int		uhci_detach(uhci_softc_t *, int);
 void		uhci_shutdown(void *v);
 void		uhci_power(int state, void *priv);
-int		uhci_driver_load(module_t, int, void *);
+

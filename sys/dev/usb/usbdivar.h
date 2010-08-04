@@ -175,7 +175,6 @@ struct usbd_pipe {
 	struct usbd_interface  *iface;
 	struct usbd_device     *device;
 	struct usbd_endpoint   *endpoint;
-	struct mtx		mtx;
 	int			refcnt;
 	char			running;
 	char			aborting;
@@ -189,13 +188,6 @@ struct usbd_pipe {
 	/* Filled by HC driver. */
 	struct usbd_pipe_methods *methods;
 };
-
-#define	USBD_PIPE_LOCK_INIT(_pipe)					\
-	mtx_init(&(_pipe)->mtx, "usb pipe lock", NULL, MTX_DEF)
-#define	USBD_PIPE_LOCK_DESTROY(_pipe)	mtx_destroy(&(_pipe)->mtx)
-#define	USBD_PIPE_LOCK(_pipe)		mtx_lock(&(_pipe)->mtx)
-#define	USBD_PIPE_UNLOCK(_pipe)		mtx_unlock(&(_pipe)->mtx)
-#define	USBD_PIPE_LOCK_ASSERT(_pipe)	mtx_assert(&(_pipe)->mtx, MA_OWNED)
 
 #define USB_DMA_NSEG (btoc(MAXPHYS) + 1)
 
@@ -285,6 +277,20 @@ void		usb_disconnect_port(struct usbd_port *up, device_t);
 void		usb_needs_explore(usbd_device_handle);
 void		usb_schedsoftintr(struct usbd_bus *);
 
+/*
+ * XXX This check is extremely bogus. Bad Bad Bad.
+ */
+#if defined(DIAGNOSTIC) && 0
+#define SPLUSBCHECK \
+	do { int _s = splusb(), _su = splusb(); \
+             if (!cold && _s != _su) printf("SPLUSBCHECK failed 0x%x!=0x%x, %s:%d\n", \
+				   _s, _su, __FILE__, __LINE__); \
+	     splx(_s); \
+        } while (0)
+#else
+#define SPLUSBCHECK
+#endif
+
 /* Locator stuff. */
 
 /* XXX these values are used to statically bind some elements in the USB tree
@@ -312,5 +318,3 @@ void		usb_schedsoftintr(struct usbd_bus *);
 #define	UHUB_UNK_PRODUCT	UHUBCF_PRODUCT_DEFAULT /* wildcarded 'product' */
 #define	UHUB_UNK_RELEASE	UHUBCF_RELEASE_DEFAULT /* wildcarded 'release' */
 
-/* XXX DELETE ME */
-#define	TODO()		printf("%s: TODO\n", __func__);

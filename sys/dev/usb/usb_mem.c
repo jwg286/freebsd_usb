@@ -55,8 +55,6 @@ __FBSDID("$FreeBSD: stable/7/sys/dev/usb/usb_mem.c 170960 2007-06-20 05:11:37Z i
 #include <sys/endian.h>
 #include <sys/module.h>
 #include <sys/bus.h>
-#include <sys/lock.h>
-#include <sys/mutex.h>
 #include <sys/queue.h>
 
 #include <machine/bus.h>
@@ -96,11 +94,6 @@ static usbd_status	usb_block_allocmem(bus_dma_tag_t, size_t, size_t,
 					   usb_dma_block_t **);
 static void		usb_block_freemem(usb_dma_block_t *);
 
-static int usbmem_inited = 0;
-#define	USB_MEM_LOCK()		mtx_lock(&usbmem_lock)
-#define	USB_MEM_UNLOCK()	mtx_unlock(&usbmem_lock)
-#define	USB_MEM_LOCK_ASSERT()	mtx_assert(&usbmem_lock, MA_OWNED)
-static struct mtx usbmem_lock;
 static LIST_HEAD(, usb_dma_block) usb_blk_freelist =
 	LIST_HEAD_INITIALIZER(usb_blk_freelist);
 static int usb_blk_nfree = 0;
@@ -129,8 +122,7 @@ usb_block_allocmem(bus_dma_tag_t tag, size_t size, size_t align,
 		   usb_dma_block_t **dmap)
 {
         usb_dma_block_t *p;
-
-	USB_MEM_LOCK_ASSERT();
+	int s;
 
 	DPRINTFN(5, ("usb_block_allocmem: size=%lu align=%lu\n",
 		     (u_long)size, (u_long)align));
@@ -142,18 +134,21 @@ usb_block_allocmem(bus_dma_tag_t tag, size_t size, size_t align,
 	}
 #endif
 
+	s = splusb();
 	/* First check the free list. */
 	for (p = LIST_FIRST(&usb_blk_freelist); p; p = LIST_NEXT(p, next)) {
-		if (p->ptag == tag && p->size >= size && p->size < size * 2 &&
+		if (p->tag == tag && p->size >= size && p->size < size * 2 &&
 		    p->align >= align) {
 			LIST_REMOVE(p, next);
 			usb_blk_nfree--;
+			splx(s);
 			*dmap = p;
 			DPRINTFN(6,("usb_block_allocmem: free list size=%lu\n",
 				    (u_long)p->size));
 			return (USBD_NORMAL_COMPLETION);
 		}
 	}
+	splx(s);
 
 #ifdef DIAGNOSTIC
 	if (!curproc) {
@@ -185,10 +180,15 @@ usb_block_allocmem(bus_dma_tag_t tag, size_t size, size_t align,
 	    usbmem_callback, p, 0))
 		goto memfree;
 
-	p->ptag = tag;
+	/* XXX - override the tag, ok since we never free it */
+	p->tag = tag;
 	*dmap = p;
 	return (USBD_NORMAL_COMPLETION);
 
+	/*
+	 * XXX - do we need to _unload? is the order of _free and _destroy
+	 * correct?
+	 */
 memfree:
 	bus_dmamem_free(p->tag, p->kaddr, p->map);
 tagfree:
@@ -206,12 +206,13 @@ free:
 static void
 usb_block_freemem(usb_dma_block_t *p)
 {
+	int s;
 
 	DPRINTFN(6, ("usb_block_freemem: size=%lu\n", (u_long)p->size));
-	USB_MEM_LOCK();
+	s = splusb();
 	LIST_INSERT_HEAD(&usb_blk_freelist, p, next);
 	usb_blk_nfree++;
-	USB_MEM_UNLOCK();
+	splx(s);
 }
 
 usbd_status
@@ -222,8 +223,7 @@ usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 	struct usb_frag_dma *f;
 	usb_dma_block_t *b;
 	int i;
-
-	USB_MEM_LOCK();
+	int s;
 
 	/* compat w/ Net/OpenBSD */
 	if (align == 0)
@@ -239,10 +239,10 @@ usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 			p->offs = 0;
 			p->len = size;
 		}
-		USB_MEM_UNLOCK();
 		return (err);
 	}
 
+	s = splusb();
 	/* Check for free fragments. */
 	for (f = LIST_FIRST(&usb_frag_freelist); f; f = LIST_NEXT(f, next))
 		if (f->block->tag == tag)
@@ -251,14 +251,14 @@ usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 		DPRINTFN(1, ("usb_allocmem: adding fragments\n"));
 		err = usb_block_allocmem(tag, USB_MEM_BLOCK, USB_MEM_SMALL,&b);
 		if (err) {
-			USB_MEM_UNLOCK();
+			splx(s);
 			return (err);
 		}
 		b->fullblock = 0;
-		KASSERT(b->ptag == tag, ("Assumption is wrong"));
-		KASSERT(sizeof *f <= USB_MEM_SMALL,
-		    ("USB_MEM_SMALL(%d) is too small for "
-		     "struct usb_frag_dma(%zd)\n", USB_MEM_SMALL, sizeof *f));
+		/* XXX - override the tag, ok since we never free it */
+		b->tag = tag;
+		KASSERT(sizeof *f <= USB_MEM_SMALL, ("USB_MEM_SMALL(%d) is too small for struct usb_frag_dma(%zd)\n",
+		    USB_MEM_SMALL, sizeof *f));
 		for (i = 0; i < USB_MEM_BLOCK; i += USB_MEM_SMALL) {
 			f = (struct usb_frag_dma *)((char *)b->kaddr + i);
 			f->block = b;
@@ -271,7 +271,7 @@ usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 	p->offs = f->offs;
 	p->len = USB_MEM_SMALL;
 	LIST_REMOVE(f, next);
-	USB_MEM_UNLOCK();
+	splx(s);
 	DPRINTFN(5, ("usb_allocmem: use frag=%p size=%d\n", f, (int)size));
 	return (USBD_NORMAL_COMPLETION);
 }
@@ -280,6 +280,7 @@ void
 usb_freemem(usbd_bus_handle bus, usb_dma_t *p)
 {
 	struct usb_frag_dma *f;
+	int s;
 
 	if (p->block->fullblock) {
 		DPRINTFN(1, ("usb_freemem: large free\n"));
@@ -289,28 +290,8 @@ usb_freemem(usbd_bus_handle bus, usb_dma_t *p)
 	f = KERNADDR(p, 0);
 	f->block = p->block;
 	f->offs = p->offs;
-	USB_MEM_LOCK();
+	s = splusb();
 	LIST_INSERT_HEAD(&usb_frag_freelist, f, next);
-	USB_MEM_UNLOCK();
+	splx(s);
 	DPRINTFN(5, ("usb_freemem: frag=%p\n", f));
-}
-
-void
-usbmem_driver_load(void)
-{
-
-	if (atomic_cmpset_int(&usbmem_inited, 0, 1))
-		mtx_init(&usbmem_lock, "USBMEM lock", NULL, MTX_DEF);
-	else
-		atomic_add_int(&usbmem_inited, 1);
-}
-
-void
-usbmem_driver_unload(void)
-{
-
-	if (atomic_cmpset_int(&usbmem_inited, 1, 0))
-		mtx_destroy(&usbmem_lock);
-	else
-		atomic_add_int(&usbmem_inited, -1);
 }

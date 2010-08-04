@@ -59,7 +59,6 @@ __FBSDID("$FreeBSD: stable/7/sys/dev/usb/uhci_pci.c 178442 2008-04-23 18:54:51Z 
 #include <sys/bus.h>
 #include <sys/queue.h>
 #include <sys/bus.h>
-#include <sys/taskqueue.h>
 
 #include <machine/bus.h>
 #include <machine/resource.h>
@@ -189,16 +188,27 @@ static device_resume_t uhci_pci_resume;
 static int
 uhci_pci_suspend(device_t self)
 {
+	uhci_softc_t *sc = device_get_softc(self);
+	int err;
 
-	KASSERT((0 == 1), ("TODO"));
-	return ENXIO;
+	err = bus_generic_suspend(self);
+	if (err)
+		return err;
+	uhci_power(PWR_SUSPEND, sc);
+
+	return 0;
 }
 
 static int
 uhci_pci_resume(device_t self)
 {
+	uhci_softc_t *sc = device_get_softc(self);
 
-	KASSERT((0 == 1), ("TODO"));
+	pci_write_config(self, PCI_LEGSUP, PCI_LEGSUP_USBPIRQDEN, 2);
+
+	uhci_power(PWR_RESUME, sc);
+	bus_generic_resume(self);
+
 	return 0;
 }
 
@@ -295,13 +305,6 @@ uhci_pci_probe(device_t self)
 	}
 }
 
-static void
-uhci_pci_busdma_lock_mutex(void *arg, bus_dma_lock_op_t op)
-{
-
-	TODO();
-}
-
 static int
 uhci_pci_attach(device_t self)
 {
@@ -368,7 +371,7 @@ uhci_pci_attach(device_t self)
 		break;
 	}
 
-	err = bus_setup_intr(self, sc->irq_res, INTR_TYPE_BIO | INTR_MPSAFE,
+	err = bus_setup_intr(self, sc->irq_res, INTR_TYPE_BIO,
 	    NULL, (driver_intr_t *) uhci_intr, sc, &sc->ih);
 	if (err) {
 		device_printf(self, "Could not setup irq, %d\n", err);
@@ -404,16 +407,13 @@ uhci_pci_attach(device_t self)
 	err = bus_dma_tag_create(sc->sc_bus.parent_dmatag, 1, 0,
 	    BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR, NULL, NULL,
 	    BUS_SPACE_MAXSIZE_32BIT, USB_DMA_NSEG, BUS_SPACE_MAXSIZE_32BIT, 0,
-	    uhci_pci_busdma_lock_mutex, NULL, &sc->sc_bus.buffer_dmatag);
+	    busdma_lock_mutex, &Giant, &sc->sc_bus.buffer_dmatag);
 	if (err) {
 		device_printf(self, "Could not allocate transfer tag (%d)\n",
 		    err);
 		uhci_pci_detach(self);
 		return ENXIO;
 	}
-	sc->sc_tq = taskqueue_create_fast("uhci_taskq", M_NOWAIT,
-	    taskqueue_thread_enqueue, &sc->sc_tq);
-	taskqueue_start_threads(&sc->sc_tq, 1, PI_NET, "uhci taskq");
 
 	err = uhci_init(sc);
 	if (!err) {
@@ -453,11 +453,6 @@ uhci_pci_detach(device_t self)
 			    err);
 		sc->ih = NULL;
 	}
-	if (sc->sc_tq != NULL) {
-		taskqueue_drain(sc->sc_tq, &sc->sc_resettask);
-		taskqueue_free(sc->sc_tq);
-		sc->sc_tq = NULL;
-	}
 	if (sc->sc_bus.bdev) {
 		device_delete_child(self, sc->sc_bus.bdev);
 		sc->sc_bus.bdev = NULL;
@@ -475,6 +470,7 @@ uhci_pci_detach(device_t self)
 	}
 	return 0;
 }
+
 
 static device_method_t uhci_methods[] = {
 	/* Device interface */
@@ -499,5 +495,5 @@ static driver_t uhci_driver = {
 
 static devclass_t uhci_devclass;
 
-DRIVER_MODULE(uhci, pci, uhci_driver, uhci_devclass, uhci_driver_load, 0);
-DRIVER_MODULE(uhci, cardbus, uhci_driver, uhci_devclass, uhci_driver_load, 0);
+DRIVER_MODULE(uhci, pci, uhci_driver, uhci_devclass, 0, 0);
+DRIVER_MODULE(uhci, cardbus, uhci_driver, uhci_devclass, 0, 0);
