@@ -1126,7 +1126,8 @@ uhci_intr(void *arg)
 {
 	uhci_softc_t *sc = arg;
 
-	if (sc->sc_dying)
+	if ((sc->sc_flags & UHCI_SCFLG_DONEINIT) == 0 ||
+	    sc->sc_dying)
 		return (0);
 
 	DPRINTFN(15,("uhci_intr: real interrupt\n"));
