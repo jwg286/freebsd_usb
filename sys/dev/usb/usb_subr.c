@@ -1319,8 +1319,10 @@ usb_free_device(usbd_device_handle dev)
 	}
 	if (dev->cdesc != NULL)
 		free(dev->cdesc, M_USB);
-	if (dev->subdevs != NULL)
+	if (dev->subdevs != NULL) {
+		KASSERT(dev->subdevs[0] == NULL, ("Undetached child"));
 		free(dev->subdevs, M_USB);
+	}
 	if (dev->ifacenums != NULL)
 		free(dev->ifacenums, M_USB);
 	free(dev, M_USB);
