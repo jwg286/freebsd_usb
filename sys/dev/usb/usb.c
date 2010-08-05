@@ -453,6 +453,8 @@ usb_event_thread(void *arg)
 	/* In case parent is waiting for us to exit. */
 	wakeup(sc);
 
+	mtx_unlock(&Giant);
+
 	DPRINTF(("usb_event_thread: exit\n"));
 	kproc_exit(0);
 }
@@ -489,6 +491,8 @@ usb_task_thread(void *arg)
 
 	taskq->taskcreated = 0;
 	wakeup(&taskq->taskcreated);
+
+	mtx_unlock(&Giant);
 
 	DPRINTF(("usb_event_thread: exit\n"));
 	kproc_exit(0);
