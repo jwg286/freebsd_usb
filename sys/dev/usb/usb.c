@@ -429,10 +429,18 @@ usb_event_thread(void *arg)
 			break;
 	}
 
-	/* Make sure first discover does something. */
-	sc->sc_bus->needs_explore = 1;
-	usb_discover(sc);
-	/* XXX really do right config_pending_decr(); */
+	/*
+	 * Make sure first discover does something if the driver isn't
+	 * detaching.  Checks here sc->sc_dying first before calling
+	 * usb_discover() because this thread is slept about 4 seconds above
+	 * so the kernel could be crashed if the user runs `kldunload(2) usb'
+	 * within 4 seconds.
+	 */
+	if (sc->sc_dying) {
+		sc->sc_bus->needs_explore = 1;
+		usb_discover(sc);
+		/* XXX really do right config_pending_decr(); */
+	}
 
 	while (!sc->sc_dying) {
 #ifdef USB_DEBUG
