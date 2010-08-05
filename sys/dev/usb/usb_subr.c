@@ -1377,6 +1377,10 @@ usb_disconnect_port(struct usbd_port *up, device_t parent, int detaching)
 				    "cleared");
 			}
 
+			/*
+			 * XXX FreeBSD, no ways to free `uapp' pointer at this
+			 * moment.
+			 */
 			if (detaching == 0) {
 				struct usb_attach_arg *uaap =
 				    device_get_ivars(dev->subdevs[i]);
