@@ -271,7 +271,7 @@ void		usb_free_device(usbd_device_handle);
 
 usbd_status	usb_insert_transfer(usbd_xfer_handle xfer);
 void		usb_transfer_complete(usbd_xfer_handle xfer);
-void		usb_disconnect_port(struct usbd_port *up, device_t);
+void		usb_disconnect_port(struct usbd_port *up, device_t, int);
 
 /* Routines from usb.c */
 void		usb_needs_explore(usbd_device_handle);

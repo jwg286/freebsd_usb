@@ -1346,7 +1346,7 @@ usb_free_device(usbd_device_handle dev)
  * been disconnected.
  */
 void
-usb_disconnect_port(struct usbd_port *up, device_t parent)
+usb_disconnect_port(struct usbd_port *up, device_t parent, int detaching)
 {
 	usbd_device_handle dev = up->device;
 	const char *hubname = device_get_nameunit(parent);
@@ -1363,22 +1363,29 @@ usb_disconnect_port(struct usbd_port *up, device_t parent)
 #endif
 
 	if (dev->subdevs != NULL) {
-		DPRINTFN(3,("usb_disconnect_port: disconnect subdevs\n"));
+		DPRINTFN(3,
+		    ("usb_disconnect_port: %s subdevs\n", (detaching == 0) ?
+		    "disconnect" : "clear"));
 		for (i = 0; dev->subdevs[i]; i++) {
 			if (!device_is_quiet(dev->subdevs[i])) {
 				device_printf(dev->subdevs[i],
 						  "at %s", hubname);
 				if (up->portno != 0)
 					printf(" port %d", up->portno);
-				printf(" (addr %d) disconnected\n", dev->address);
+				printf(" (addr %d) %s\n", dev->address,
+				    (detaching == 0) ? "disconnected" :
+				    "cleared");
 			}
 
-			struct usb_attach_arg *uaap =
-			    device_get_ivars(dev->subdevs[i]);
-			device_detach(dev->subdevs[i]);
-			free(uaap, M_USB);
-			device_delete_child(device_get_parent(dev->subdevs[i]),
-			    dev->subdevs[i]);
+			if (detaching == 0) {
+				struct usb_attach_arg *uaap =
+				    device_get_ivars(dev->subdevs[i]);
+				device_detach(dev->subdevs[i]);
+				free(uaap, M_USB);
+				device_delete_child(
+				    device_get_parent(dev->subdevs[i]),
+				    dev->subdevs[i]);
+			}
 			dev->subdevs[i] = NULL;
 		}
 	}

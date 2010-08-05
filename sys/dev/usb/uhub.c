@@ -459,7 +459,7 @@ uhub_explore(usbd_device_handle dev)
 			/* Disconnected */
 			DPRINTF(("uhub_explore: device addr=%d disappeared "
 				 "on port %d\n", up->device->address, port));
-			usb_disconnect_port(up, sc->sc_dev);
+			usb_disconnect_port(up, sc->sc_dev, 0);
 			usbd_clear_port_feature(dev, port,
 						UHF_C_PORT_CONNECTION);
 		}
@@ -573,7 +573,7 @@ uhub_detach(device_t self)
 	for(port = 0; port < nports; port++) {
 		rup = &hub->ports[port];
 		if (rup->device)
-			usb_disconnect_port(rup, self);
+			usb_disconnect_port(rup, self, 1);
 	}
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_hub, sc->sc_dev);

@@ -864,7 +864,7 @@ usb_detach(device_t self)
 
 	/* Make all devices disconnect. */
 	if (sc->sc_port.device != NULL)
-		usb_disconnect_port(&sc->sc_port, self);
+		usb_disconnect_port(&sc->sc_port, self, 1);
 
 	/* Kill off event thread. */
 	if (sc->sc_event_thread != NULL) {
