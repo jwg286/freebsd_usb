@@ -1342,8 +1342,8 @@ usb_free_device(usbd_device_handle dev)
  */
 
 /*
- * Called from process context when we discover that a port has
- * been disconnected.
+ * Called when we discover that a port has been disconnected.  This function
+ * could be called from the process context or when the driver is detaching.
  */
 void
 usb_disconnect_port(struct usbd_port *up, device_t parent, int detaching)
