@@ -202,7 +202,7 @@ typedef struct uhci_softc {
 
 #define	UHCI_LOCK_INIT(_sc) \
 	mtx_init(&(_sc)->sc_mtx, device_get_nameunit((_sc)->sc_dev), \
-		 NULL, MTX_DEF | MTX_RECURSE)
+	    NULL, MTX_DEF)
 #define	UHCI_LOCK_DESTROY(_sc)		mtx_destroy(&(_sc)->sc_mtx)
 #define	UHCI_LOCK(_sc)			mtx_lock(&(_sc)->sc_mtx)
 #define	UHCI_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
