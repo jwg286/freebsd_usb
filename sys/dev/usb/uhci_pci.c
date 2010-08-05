@@ -371,7 +371,7 @@ uhci_pci_attach(device_t self)
 		break;
 	}
 
-	err = bus_setup_intr(self, sc->irq_res, INTR_TYPE_BIO,
+	err = bus_setup_intr(self, sc->irq_res, INTR_TYPE_BIO | INTR_MPSAFE,
 	    NULL, (driver_intr_t *) uhci_intr, sc, &sc->ih);
 	if (err) {
 		device_printf(self, "Could not setup irq, %d\n", err);
