@@ -565,6 +565,7 @@ uhub_detach(device_t self)
 	if (hub == NULL)		/* Must be partially working */
 		return (0);
 
+	sc->sc_running = 0;
 	usbd_abort_pipe(sc->sc_ipipe);
 	usbd_close_pipe(sc->sc_ipipe);
 
