@@ -101,6 +101,7 @@ struct uhub_softc {
 
 static usbd_status uhub_explore(usbd_device_handle hub);
 static void uhub_intr(usbd_xfer_handle, usbd_private_handle,usbd_status);
+static void uhci_delay_ms(usbd_device_handle, u_int);
 
 /*
  * We need two attachment points:
@@ -199,6 +200,7 @@ uhub_attach(device_t self)
 	sc->sc_dev = self;
 	UHUB_LOCK_INIT(sc);
 
+	UHUB_LOCK(sc);
 	if (dev->depth > 0 && UHUB_IS_HIGH_SPEED(sc)) {
 		device_printf(sc->sc_dev, "%s transaction translator%s\n",
 		    UHUB_IS_SINGLE_TT(sc) ? "single" : "multiple",
@@ -208,12 +210,14 @@ uhub_attach(device_t self)
 	if (err) {
 		DEVPRINTF((sc->sc_dev, "configuration failed, error=%s\n",
 		    usbd_errstr(err)));
+		UHUB_UNLOCK(sc);
 		return (ENXIO);
 	}
 
 	if (dev->depth > USB_HUB_MAX_DEPTH) {
 		device_printf(sc->sc_dev, "hub depth (%d) exceeded, hub ignored\n",
 		    USB_HUB_MAX_DEPTH);
+		UHUB_UNLOCK(sc);
 		return (ENXIO);
 	}
 
@@ -233,6 +237,7 @@ uhub_attach(device_t self)
 	if (err) {
 		DEVPRINTF((sc->sc_dev, "getting hub descriptor failed: %s\n",
 		    usbd_errstr(err)));
+		UHUB_UNLOCK(sc);
 		return (ENXIO);
 	}
 
@@ -251,6 +256,7 @@ uhub_attach(device_t self)
 	hub = malloc(sizeof(*hub) + (nports-1) * sizeof(struct usbd_port),
 		     M_USBDEV, M_NOWAIT);
 	if (hub == NULL) {
+		UHUB_UNLOCK(sc);
 		return (ENXIO);
 	}
 	dev->hub = hub;
@@ -296,7 +302,7 @@ uhub_attach(device_t self)
 	}
 
 	/* Wait with power off for a while. */
-	usbd_delay_ms(dev, USB_POWER_DOWN_TIME);
+	uhci_delay_ms(dev, USB_POWER_DOWN_TIME);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, dev, sc->sc_dev);
 
@@ -365,12 +371,11 @@ uhub_attach(device_t self)
 			    usbd_errstr(err));
 		DPRINTF(("usb_init_port: turn on port %d power\n", port));
 		/* Wait for stable power. */
-		usbd_delay_ms(dev, pwrdly);
+		uhci_delay_ms(dev, pwrdly);
 	}
 
 	/* The usual exploration will finish the setup. */
 
-	UHUB_LOCK(sc);
 	sc->sc_running = 1;
 	UHUB_UNLOCK(sc);
 	return (0);
@@ -378,6 +383,7 @@ uhub_attach(device_t self)
 	if (hub)
 		free(hub, M_USBDEV);
 	dev->hub = NULL;
+	UHUB_UNLOCK(sc);
 	return (ENXIO);
 }
 
@@ -494,7 +500,7 @@ uhub_explore(usbd_device_handle dev)
 			    "strange, connected port %d has no power\n", port);
 
 		/* Wait for maximum device power up time. */
-		usbd_delay_ms(dev, USB_PORT_POWERUP_DELAY);
+		uhci_delay_ms(dev, USB_PORT_POWERUP_DELAY);
 
 		/* Reset port, which implies enabling it. */
 		if (usbd_reset_port(dev, port, &up->status)) {
@@ -565,6 +571,20 @@ uhub_explore(usbd_device_handle dev)
 	}
 	UHUB_UNLOCK(sc);
 	return (USBD_NORMAL_COMPLETION);
+}
+
+static void
+uhci_delay_ms(usbd_device_handle dev, u_int ms)
+{
+	usbd_bus_handle bus = dev->bus;
+	struct uhub_softc *sc = dev->hub->hubsoftc;
+
+	/* Wait at least two clock ticks so we know the time has passed. */
+	if (bus->use_polling || cold)
+		DELAY((ms+1) * 1000);
+	else
+		msleep(dev, &sc->sc_mtx, PRIBIO, "uhubdly",
+		    (ms * hz + 999) / 1000 + 1);
 }
 
 /*
