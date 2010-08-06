@@ -181,6 +181,8 @@ struct usbd_interface {
 };
 
 struct usbd_pipe {
+	struct mtx		mtx;
+	char			*pipenameunit;	/* for mtx name */
 	struct usbd_interface  *iface;
 	struct usbd_device     *device;
 	struct usbd_endpoint   *endpoint;
@@ -197,6 +199,13 @@ struct usbd_pipe {
 	/* Filled by HC driver. */
 	struct usbd_pipe_methods *methods;
 };
+
+#define	USB_PIPE_LOCK_INIT(_pipe) \
+	mtx_init(&(_pipe)->mtx, usb_pipe_get_nameunit((_pipe)), NULL, MTX_DEF)
+#define	USB_PIPE_LOCK_DESTROY(_pipe)	mtx_destroy(&(_pipe)->mtx)
+#define	USB_PIPE_LOCK(_pipe)		mtx_lock(&(_pipe)->mtx)
+#define	USB_PIPE_UNLOCK(_pipe)		mtx_unlock(&(_pipe)->mtx)
+#define	USB_PIPE_LOCK_ASSERT(_pipe)	mtx_assert(&(_pipe)->mtx, MA_OWNED)
 
 #define USB_DMA_NSEG (btoc(MAXPHYS) + 1)
 

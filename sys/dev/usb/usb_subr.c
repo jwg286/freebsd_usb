@@ -58,6 +58,8 @@ __FBSDID("$FreeBSD: stable/7/sys/dev/usb/usb_subr.c 190251 2009-03-22 06:37:14Z 
 #include <sys/malloc.h>
 #include <sys/module.h>
 #include <sys/bus.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
 
@@ -728,6 +730,35 @@ usbd_set_config_index(usbd_device_handle dev, int index, int msg)
 	return (err);
 }
 
+static usbd_status
+usb_pipe_set_nameunit(usbd_pipe_handle p)
+{
+	struct usbd_endpoint *ep = p->endpoint;
+	usbd_device_handle dev = p->device;
+	usbd_interface_handle iface = p->iface;
+	int buflen;
+
+	buflen = snprintf(NULL, 0, "%s %d %d$",
+	    device_get_nameunit(dev->bus->bdev),
+	    (iface != NULL) ? iface->index : -1, ep->edesc->bEndpointAddress);
+	if (buflen < 0)
+		return (USBD_NOMEM);
+	p->pipenameunit = malloc(buflen, M_USB, M_NOWAIT | M_ZERO);
+	if (!p->pipenameunit)
+		return (USBD_NOMEM);
+	snprintf(p->pipenameunit, buflen, "%s %d %d",
+	    device_get_nameunit(dev->bus->bdev),
+	    (iface != NULL) ? iface->index : -1, ep->edesc->bEndpointAddress);
+	return (USBD_NORMAL_COMPLETION);
+}
+
+static char *
+usb_pipe_get_nameunit(usbd_pipe_handle p)
+{
+
+	return (p->pipenameunit);
+}
+
 /* XXX add function for alternate settings */
 
 usbd_status
@@ -745,6 +776,10 @@ usbd_setup_pipe(usbd_device_handle dev, usbd_interface_handle iface,
 	p->device = dev;
 	p->iface = iface;
 	p->endpoint = ep;
+	err = usb_pipe_set_nameunit(p);
+	if (err)
+		return (err);
+	USB_PIPE_LOCK_INIT(p);
 	ep->refcnt++;
 	p->refcnt = 1;
 	p->intrxfer = 0;
@@ -785,6 +820,8 @@ usbd_kill_pipe(usbd_pipe_handle pipe)
 	usbd_abort_pipe(pipe);
 	pipe->methods->close(pipe);
 	pipe->endpoint->refcnt--;
+	free(pipe->pipenameunit, M_USB);
+	USB_PIPE_LOCK_DESTROY(pipe);
 	free(pipe, M_USB);
 }
 
