@@ -175,7 +175,7 @@ static int usb_nevents = 0;
 static struct selinfo usb_selevent;
 static struct proc *usb_async_proc;  /* process that wants USB SIGIO */
 static int usb_dev_open = 0;
-static void usb_add_event(int, struct usb_event *);
+static void usb_add_event(int, struct usb_event *, device_t);
 
 static int usb_get_next_event(struct usb_event *);
 
@@ -265,7 +265,7 @@ usb_attach(device_t self)
 		sc->sc_bus->use_polling++;
 
 	ue.u.ue_ctrlr.ue_bus = device_get_unit(sc->sc_dev);
-	usb_add_event(USB_EVENT_CTRLR_ATTACH, &ue);
+	usb_add_event(USB_EVENT_CTRLR_ATTACH, &ue, self);
 
 #ifdef USB_USE_SOFTINTR
 #ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
@@ -777,7 +777,7 @@ usbd_add_dev_event(int type, usbd_device_handle udev)
 	struct usb_event ue;
 
 	usbd_fill_deviceinfo(udev, &ue.u.ue_device, USB_EVENT_IS_ATTACH(type));
-	usb_add_event(type, &ue);
+	usb_add_event(type, &ue, udev->bus->bdev);
 }
 
 void
@@ -788,18 +788,23 @@ usbd_add_drv_event(int type, usbd_device_handle udev, device_t dev)
 	ue.u.ue_driver.ue_cookie = udev->cookie;
 	strncpy(ue.u.ue_driver.ue_devname, device_get_nameunit(dev),
 	    sizeof ue.u.ue_driver.ue_devname);
-	usb_add_event(type, &ue);
+	usb_add_event(type, &ue, dev);
 }
 
 void
-usb_add_event(int type, struct usb_event *uep)
+usb_add_event(int type, struct usb_event *uep, device_t dev)
 {
 	struct usb_event_q *ueq;
 	struct usb_event ue;
 	struct timeval thetime;
 	int s;
 
-	ueq = malloc(sizeof *ueq, M_USBDEV, M_WAITOK);
+	ueq = malloc(sizeof *ueq, M_USBDEV, M_NOWAIT);
+	if (ueq == NULL) {
+		device_printf(dev,
+		    "failed to enqueue a event due to out of memory\n");
+		return;
+	}
 	ueq->ue = *uep;
 	ueq->ue.ue_type = type;
 	microtime(&thetime);
@@ -912,7 +917,7 @@ usb_detach(device_t self)
 #endif
 
 	ue.u.ue_ctrlr.ue_bus = device_get_unit(sc->sc_dev);
-	usb_add_event(USB_EVENT_CTRLR_DETACH, &ue);
+	usb_add_event(USB_EVENT_CTRLR_DETACH, &ue, self);
 
 	return (0);
 }
