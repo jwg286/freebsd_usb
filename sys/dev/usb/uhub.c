@@ -86,6 +86,7 @@ struct uhub_softc {
 	usbd_pipe_handle	sc_ipipe;	/* interrupt pipe */
 	u_int8_t		sc_status[32];	/* max 255 ports */
 	u_char			sc_running;
+	u_char			sc_exploring;
 };
 #define UHUB_PROTO(sc) ((sc)->sc_hub->ddesc.bDeviceProtocol)
 #define UHUB_IS_HIGH_SPEED(sc) (UHUB_PROTO(sc) != UDPROTO_FSHUB)
@@ -407,6 +408,7 @@ uhub_explore(usbd_device_handle dev)
 	if (dev->depth > USB_HUB_MAX_DEPTH)
 		return (USBD_TOO_DEEP);
 
+	sc->sc_exploring = 1;
 	for(port = 1; port <= hd->bNbrPorts; port++) {
 		up = &dev->hub->ports[port-1];
 		err = usbd_get_port_status(dev, port, &up->status);
@@ -566,6 +568,7 @@ uhub_explore(usbd_device_handle dev)
 				up->device->hub->explore(up->device);
 		}
 	}
+	sc->sc_exploring = 0;
 	return (USBD_NORMAL_COMPLETION);
 }
 
@@ -594,13 +597,24 @@ uhub_detach(device_t self)
 	struct uhub_softc *sc = device_get_softc(self);
 	struct usbd_hub *hub = sc->sc_hub->hub;
 	struct usbd_port *rup;
-	int port, nports;
+	int i, port, nports;
 
 	DPRINTF(("uhub_detach: sc=%port\n", sc));
 	if (hub == NULL)		/* Must be partially working */
 		return (0);
 
 	sc->sc_running = 0;
+	/*
+	 * Waits up to 10 seconds during uhub_explore() is running that it
+	 * could be called on the USB event thread independently.
+	 */
+	UHUB_LOCK(sc);
+	for (i = 0; i < 10; i++) {
+		if (sc->sc_exploring == 0)
+			break;
+		uhub_delay_ms(sc, 1000);
+	}
+	UHUB_UNLOCK(sc);
 	usbd_abort_pipe(sc->sc_ipipe);
 	usbd_close_pipe(sc->sc_ipipe);
 
