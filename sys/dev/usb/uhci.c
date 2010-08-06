@@ -409,7 +409,7 @@ uhci_init(uhci_softc_t *sc)
 		uhci_dumpregs(sc);
 #endif
 
-	UHCI_LOCK_ASSERT(sc);
+	UHCI_LOCK(sc);
 
 	UWRITE2(sc, UHCI_INTR, 0);		/* disable interrupts */
 	uhci_globalreset(sc);			/* reset the controller */
@@ -419,8 +419,10 @@ uhci_init(uhci_softc_t *sc)
 	err = usb_allocmem(&sc->sc_bus,
 		  UHCI_FRAMELIST_COUNT * sizeof(uhci_physaddr_t),
 		  UHCI_FRAMELIST_ALIGN, &sc->sc_dma);
-	if (err)
+	if (err) {
+		UHCI_UNLOCK(sc);
 		return (err);
+	}
 	sc->sc_pframes = KERNADDR(&sc->sc_dma, 0);
 	UWRITE2(sc, UHCI_FRNUM, 0);		/* set frame number to 0 */
 	UWRITE4(sc, UHCI_FLBASEADDR, DMAADDR(&sc->sc_dma, 0)); /* set frame list*/
@@ -431,8 +433,10 @@ uhci_init(uhci_softc_t *sc)
 	 * otherwise.
 	 */
 	std = uhci_alloc_std(sc);
-	if (std == NULL)
-		return (USBD_NOMEM);
+	if (std == NULL) {
+		err = USBD_NOMEM;
+		goto bad;
+	}
 	std->link.std = NULL;
 	std->td.td_link = htole32(UHCI_PTR_T);
 	std->td.td_status = htole32(0); /* inactive */
@@ -451,8 +455,10 @@ uhci_init(uhci_softc_t *sc)
 
 	/* Allocate the dummy QH where bulk traffic will be queued. */
 	bsqh = uhci_alloc_sqh(sc);
-	if (bsqh == NULL)
-		return (USBD_NOMEM);
+	if (bsqh == NULL) {
+		err = USBD_NOMEM;
+		goto bad;
+	}
 	bsqh->hlink = lsqh;
 	bsqh->qh.qh_hlink = htole32(lsqh->physaddr | UHCI_PTR_QH);
 	bsqh->elink = NULL;
@@ -461,8 +467,10 @@ uhci_init(uhci_softc_t *sc)
 
 	/* Allocate dummy QH where high speed control traffic will be queued. */
 	chsqh = uhci_alloc_sqh(sc);
-	if (chsqh == NULL)
-		return (USBD_NOMEM);
+	if (chsqh == NULL) {
+		err = USBD_NOMEM;
+		goto bad;
+	}
 	chsqh->hlink = bsqh;
 	chsqh->qh.qh_hlink = htole32(bsqh->physaddr | UHCI_PTR_QH);
 	chsqh->elink = NULL;
@@ -471,8 +479,10 @@ uhci_init(uhci_softc_t *sc)
 
 	/* Allocate dummy QH where control traffic will be queued. */
 	clsqh = uhci_alloc_sqh(sc);
-	if (clsqh == NULL)
-		return (USBD_NOMEM);
+	if (clsqh == NULL) {
+		err = USBD_NOMEM;
+		goto bad;
+	}
 	clsqh->hlink = chsqh;
 	clsqh->qh.qh_hlink = htole32(chsqh->physaddr | UHCI_PTR_QH);
 	clsqh->elink = NULL;
@@ -487,8 +497,10 @@ uhci_init(uhci_softc_t *sc)
 	for(i = 0; i < UHCI_VFRAMELIST_COUNT; i++) {
 		std = uhci_alloc_std(sc);
 		sqh = uhci_alloc_sqh(sc);
-		if (std == NULL || sqh == NULL)
-			return (USBD_NOMEM);
+		if (std == NULL || sqh == NULL) {
+			err = USBD_NOMEM;
+			goto bad;
+		}
 		std->link.sqh = sqh;
 		std->td.td_link = htole32(sqh->physaddr | UHCI_PTR_QH);
 		std->td.td_status = htole32(UHCI_TD_IOS); /* iso, inactive */
@@ -530,7 +542,10 @@ uhci_init(uhci_softc_t *sc)
 
 	UHCICMD(sc, UHCI_CMD_MAXP); /* Assume 64 byte packets at frame end */
 
-	return (uhci_run(sc, 1));		/* and here we go... */
+	err = uhci_run(sc, 1);		/* and here we go... */
+bad:
+	UHCI_UNLOCK(sc);
+	return (err);
 }
 
 int
