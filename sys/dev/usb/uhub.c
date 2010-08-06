@@ -604,11 +604,6 @@ uhub_detach(device_t self)
 	if (hub == NULL)		/* Must be partially working */
 		return (0);
 
-	/*
-	 * When uhub(4) is detaching and if uhub_explore() is executing by
-	 * the USB event thread, the detach thread would be blocked here
-	 * because uhub_explore() is holding UHUB lock.
-	 */
 	UHUB_LOCK(sc);
 	sc->sc_running = 0;
 	UHUB_UNLOCK(sc);
