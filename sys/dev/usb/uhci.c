@@ -71,6 +71,8 @@ __FBSDID("$FreeBSD: stable/7/sys/dev/usb/uhci.c 196167 2009-08-13 07:21:24Z n_hi
 #if defined(DIAGNOSTIC) && defined(__i386__)
 #include <machine/cpu.h>
 #endif
+#include <sys/lock.h>
+#include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/sysctl.h>
@@ -406,6 +408,8 @@ uhci_init(uhci_softc_t *sc)
 	if (uhcidebug > 2)
 		uhci_dumpregs(sc);
 #endif
+
+	UHCI_LOCK_ASSERT(sc);
 
 	UWRITE2(sc, UHCI_INTR, 0);		/* disable interrupts */
 	uhci_globalreset(sc);			/* reset the controller */
