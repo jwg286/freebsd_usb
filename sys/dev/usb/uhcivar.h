@@ -143,7 +143,6 @@ struct uhci_vframe {
 typedef struct uhci_softc {
 	struct usbd_bus sc_bus;		/* base device */
 	device_t sc_dev;
-	struct mtx sc_mtx;
 	int sc_flags;
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
@@ -200,13 +199,11 @@ typedef struct uhci_softc {
 #endif
 } uhci_softc_t;
 
-#define	UHCI_LOCK_INIT(_sc) \
-	mtx_init(&(_sc)->sc_mtx, device_get_nameunit((_sc)->sc_dev), \
-	    NULL, MTX_DEF)
-#define	UHCI_LOCK_DESTROY(_sc)		mtx_destroy(&(_sc)->sc_mtx)
-#define	UHCI_LOCK(_sc)			mtx_lock(&(_sc)->sc_mtx)
-#define	UHCI_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
-#define	UHCI_LOCK_ASSERT(_sc)		mtx_assert(&(_sc)->sc_mtx, MA_OWNED)
+#define	UHCI_LOCK_INIT(_sc)	USB_BUS_LOCK_INIT(&(_sc)->sc_bus)
+#define	UHCI_LOCK_DESTROY(_sc)	USB_BUS_LOCK_DESTROY(&(_sc)->sc_bus)
+#define	UHCI_LOCK(_sc)		USB_BUS_LOCK(&(_sc)->sc_bus)
+#define	UHCI_UNLOCK(_sc)	USB_BUS_UNLOCK(&(_sc)->sc_bus)
+#define	UHCI_LOCK_ASSERT(_sc)	USB_BUS_LOCK_ASSERT(&(_sc)->sc_bus)
 
 usbd_status	uhci_init(uhci_softc_t *);
 int		uhci_intr(void *);

@@ -3749,6 +3749,6 @@ uhci_delay_ms(struct uhci_softc *sc, u_int ms)
 	if (bus->use_polling || cold)
 		DELAY((ms+1) * 1000);
 	else
-		msleep(bus, &sc->sc_mtx, PRIBIO, "uhcidly",
+		msleep(bus, &bus->mtx, PRIBIO, "uhcidly",
 		    (ms * hz + 999) / 1000 + 1);
 }

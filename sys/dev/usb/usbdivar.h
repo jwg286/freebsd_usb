@@ -104,6 +104,7 @@ struct usb_softc;
 struct usbd_bus {
 	/* Filled by HC driver */
 	device_t		bdev; /* base device, host adapter */
+	struct mtx		mtx;
 	struct usbd_bus_methods	*methods;
 	u_int32_t		pipe_size; /* size of a pipe struct */
 	/* Filled by usb driver */
@@ -134,6 +135,14 @@ struct usbd_bus {
 	bus_dma_tag_t		parent_dmatag;	/* Base DMA tag */
 	bus_dma_tag_t		buffer_dmatag;	/* Tag for transfer buffers */
 };
+
+#define	USB_BUS_LOCK_INIT(_bus) \
+	mtx_init(&(_bus)->mtx, device_get_nameunit((_bus)->bdev), \
+	    NULL, MTX_DEF)
+#define	USB_BUS_LOCK_DESTROY(_bus)	mtx_destroy(&(_bus)->mtx)
+#define	USB_BUS_LOCK(_bus)		mtx_lock(&(_bus)->mtx)
+#define	USB_BUS_UNLOCK(_bus)		mtx_unlock(&(_bus)->mtx)
+#define	USB_BUS_LOCK_ASSERT(_bus)	mtx_assert(&(_bus)->mtx, MA_OWNED)
 
 struct usbd_device {
 	struct usbd_bus	       *bus;           /* our controller */

@@ -411,7 +411,8 @@ uhci_pci_attach(device_t self)
 	err = bus_dma_tag_create(sc->sc_bus.parent_dmatag, 1, 0,
 	    BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR, NULL, NULL,
 	    BUS_SPACE_MAXSIZE_32BIT, USB_DMA_NSEG, BUS_SPACE_MAXSIZE_32BIT, 0,
-	    uhci_busdma_lock_mutex, &sc->sc_mtx, &sc->sc_bus.buffer_dmatag);
+	    uhci_busdma_lock_mutex, &sc->sc_bus.mtx,
+	    &sc->sc_bus.buffer_dmatag);
 	if (err) {
 		device_printf(self, "Could not allocate transfer tag (%d)\n",
 		    err);
