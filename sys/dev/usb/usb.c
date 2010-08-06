@@ -436,7 +436,7 @@ usb_event_thread(void *arg)
 	 * so the kernel could be crashed if the user runs `kldunload(2) usb'
 	 * within 4 seconds.
 	 */
-	if (sc->sc_dying) {
+	if (!sc->sc_dying) {
 		sc->sc_bus->needs_explore = 1;
 		usb_discover(sc);
 		/* XXX really do right config_pending_decr(); */
