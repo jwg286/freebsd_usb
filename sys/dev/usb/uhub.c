@@ -86,6 +86,7 @@ struct uhub_softc {
 	usbd_pipe_handle	sc_ipipe;	/* interrupt pipe */
 	u_int8_t		sc_status[32];	/* max 255 ports */
 	u_char			sc_running;	/* protected by sc_mtx */
+	u_char			sc_exploring;
 };
 #define UHUB_PROTO(sc) ((sc)->sc_hub->ddesc.bDeviceProtocol)
 #define UHUB_IS_HIGH_SPEED(sc) (UHUB_PROTO(sc) != UDPROTO_FSHUB)
@@ -405,11 +406,15 @@ uhub_explore(usbd_device_handle dev)
 		UHUB_UNLOCK(sc);
 		return (USBD_NOT_STARTED);
 	}
-	UHUB_UNLOCK(sc);
 
 	/* Ignore hubs that are too deep. */
-	if (dev->depth > USB_HUB_MAX_DEPTH)
+	if (dev->depth > USB_HUB_MAX_DEPTH) {
+		UHUB_UNLOCK(sc);
 		return (USBD_TOO_DEEP);
+	}
+
+	sc->sc_exploring = 1;
+	UHUB_UNLOCK(sc);
 
 	for(port = 1; port <= hd->bNbrPorts; port++) {
 		up = &dev->hub->ports[port-1];
@@ -570,6 +575,10 @@ uhub_explore(usbd_device_handle dev)
 				up->device->hub->explore(up->device);
 		}
 	}
+
+	UHUB_LOCK(sc);
+	sc->sc_exploring = 0;
+	UHUB_UNLOCK(sc);
 	return (USBD_NORMAL_COMPLETION);
 }
 
