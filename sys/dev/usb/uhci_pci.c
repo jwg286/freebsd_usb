@@ -316,7 +316,6 @@ uhci_pci_attach(device_t self)
 	pci_enable_busmaster(self);
 
 	sc->sc_dev = self;
-	UHCI_LOCK_INIT(sc);
 
 	rid = PCI_UHCI_BASE_REG;
 	sc->io_res = bus_alloc_resource_any(self, SYS_RES_IOPORT, &rid,
@@ -346,6 +345,7 @@ uhci_pci_attach(device_t self)
 		return ENOMEM;
 	}
 	device_set_ivars(sc->sc_bus.bdev, &sc->sc_bus);
+	UHCI_LOCK_INIT(sc);
 
 	/* uhci_pci_match must never return NULL if uhci_pci_probe succeeded */
 	device_set_desc(sc->sc_bus.bdev, uhci_pci_match(self));
