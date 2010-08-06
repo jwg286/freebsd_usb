@@ -771,7 +771,7 @@ usbd_setup_pipe(usbd_device_handle dev, usbd_interface_handle iface,
 
 	DPRINTFN(1,("usbd_setup_pipe: dev=%p iface=%p ep=%p pipe=%p\n",
 		    dev, iface, ep, pipe));
-	p = malloc(dev->bus->pipe_size, M_USB, M_NOWAIT);
+	p = malloc(dev->bus->pipe_size, M_USB, M_NOWAIT | M_ZERO);
 	if (p == NULL)
 		return (USBD_NOMEM);
 	p->device = dev;
