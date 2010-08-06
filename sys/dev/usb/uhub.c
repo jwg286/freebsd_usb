@@ -101,7 +101,7 @@ struct uhub_softc {
 
 static usbd_status uhub_explore(usbd_device_handle hub);
 static void uhub_intr(usbd_xfer_handle, usbd_private_handle,usbd_status);
-static void uhci_delay_ms(usbd_device_handle, u_int);
+static void uhub_delay_ms(usbd_device_handle, u_int);
 
 /*
  * We need two attachment points:
@@ -302,7 +302,7 @@ uhub_attach(device_t self)
 	}
 
 	/* Wait with power off for a while. */
-	uhci_delay_ms(dev, USB_POWER_DOWN_TIME);
+	uhub_delay_ms(dev, USB_POWER_DOWN_TIME);
 
 	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, dev, sc->sc_dev);
 
@@ -371,7 +371,7 @@ uhub_attach(device_t self)
 			    usbd_errstr(err));
 		DPRINTF(("usb_init_port: turn on port %d power\n", port));
 		/* Wait for stable power. */
-		uhci_delay_ms(dev, pwrdly);
+		uhub_delay_ms(dev, pwrdly);
 	}
 
 	/* The usual exploration will finish the setup. */
@@ -500,7 +500,7 @@ uhub_explore(usbd_device_handle dev)
 			    "strange, connected port %d has no power\n", port);
 
 		/* Wait for maximum device power up time. */
-		uhci_delay_ms(dev, USB_PORT_POWERUP_DELAY);
+		uhub_delay_ms(dev, USB_PORT_POWERUP_DELAY);
 
 		/* Reset port, which implies enabling it. */
 		if (usbd_reset_port(dev, port, &up->status)) {
@@ -574,7 +574,7 @@ uhub_explore(usbd_device_handle dev)
 }
 
 static void
-uhci_delay_ms(usbd_device_handle dev, u_int ms)
+uhub_delay_ms(usbd_device_handle dev, u_int ms)
 {
 	usbd_bus_handle bus = dev->bus;
 	struct uhub_softc *sc = dev->hub->hubsoftc;
@@ -603,6 +603,11 @@ uhub_detach(device_t self)
 	if (hub == NULL)		/* Must be partially working */
 		return (0);
 
+	/*
+	 * When uhub(4) is detaching and if uhub_explore() is executing by
+	 * the USB event thread, the detach thread would be blocked here
+	 * because uhub_explore() is holding UHUB lock.
+	 */
 	UHUB_LOCK(sc);
 	sc->sc_running = 0;
 	UHUB_UNLOCK(sc);
