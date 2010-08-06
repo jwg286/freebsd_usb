@@ -3645,7 +3645,9 @@ uhci_root_ctrl_start(usbd_xfer_handle xfer)
 			UWRITE2(sc, port, x | UHCI_PORTSC_SUSP);
 			break;
 		case UHF_PORT_RESET:
+			UHCI_LOCK(sc);
 			err = uhci_portreset(sc, index);
+			UHCI_UNLOCK(sc);
 			goto ret;
 		case UHF_PORT_POWER:
 			/* Pretend we turned on power */
