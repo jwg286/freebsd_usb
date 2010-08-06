@@ -85,7 +85,7 @@ struct uhub_softc {
 	usbd_device_handle	sc_hub;		/* USB device */
 	usbd_pipe_handle	sc_ipipe;	/* interrupt pipe */
 	u_int8_t		sc_status[32];	/* max 255 ports */
-	u_char			sc_running;	/* protected by sc_mtx */
+	u_char			sc_running;
 };
 #define UHUB_PROTO(sc) ((sc)->sc_hub->ddesc.bDeviceProtocol)
 #define UHUB_IS_HIGH_SPEED(sc) (UHUB_PROTO(sc) != UDPROTO_FSHUB)
@@ -376,8 +376,8 @@ uhub_attach(device_t self)
 
 	/* The usual exploration will finish the setup. */
 
-	sc->sc_running = 1;
 	UHUB_UNLOCK(sc);
+	sc->sc_running = 1;
 	return (0);
  bad:
 	if (hub)
@@ -400,12 +400,8 @@ uhub_explore(usbd_device_handle dev)
 
 	DPRINTFN(10, ("uhub_explore dev=%p addr=%d\n", dev, dev->address));
 
-	UHUB_LOCK(sc);
-	if (!sc->sc_running) {
-		UHUB_UNLOCK(sc);
+	if (!sc->sc_running)
 		return (USBD_NOT_STARTED);
-	}
-	UHUB_UNLOCK(sc);
 
 	/* Ignore hubs that are too deep. */
 	if (dev->depth > USB_HUB_MAX_DEPTH)
@@ -604,10 +600,7 @@ uhub_detach(device_t self)
 	if (hub == NULL)		/* Must be partially working */
 		return (0);
 
-	UHUB_LOCK(sc);
 	sc->sc_running = 0;
-	UHUB_UNLOCK(sc);
-
 	usbd_abort_pipe(sc->sc_ipipe);
 	usbd_close_pipe(sc->sc_ipipe);
 
