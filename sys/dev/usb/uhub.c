@@ -405,12 +405,11 @@ uhub_explore(usbd_device_handle dev)
 		UHUB_UNLOCK(sc);
 		return (USBD_NOT_STARTED);
 	}
+	UHUB_UNLOCK(sc);
 
 	/* Ignore hubs that are too deep. */
-	if (dev->depth > USB_HUB_MAX_DEPTH) {
-		UHUB_UNLOCK(sc);
+	if (dev->depth > USB_HUB_MAX_DEPTH)
 		return (USBD_TOO_DEEP);
-	}
 
 	for(port = 1; port <= hd->bNbrPorts; port++) {
 		up = &dev->hub->ports[port-1];
@@ -569,7 +568,6 @@ uhub_explore(usbd_device_handle dev)
 				up->device->hub->explore(up->device);
 		}
 	}
-	UHUB_UNLOCK(sc);
 	return (USBD_NORMAL_COMPLETION);
 }
 
