@@ -499,7 +499,9 @@ uhub_explore(usbd_device_handle dev)
 			    "strange, connected port %d has no power\n", port);
 
 		/* Wait for maximum device power up time. */
+		UHUB_LOCK(sc);
 		uhub_delay_ms(sc, USB_PORT_POWERUP_DELAY);
+		UHUB_UNLOCK(sc);
 
 		/* Reset port, which implies enabling it. */
 		if (usbd_reset_port(dev, port, &up->status)) {
