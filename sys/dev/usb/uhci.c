@@ -267,6 +267,7 @@ static void		uhci_dump_td(uhci_soft_td_t *);
 static void		uhci_dump_ii(uhci_intr_info_t *ii);
 void			uhci_dump(void);
 #endif
+static void		uhci_delay_ms(struct uhci_softc *, u_int);
 
 #define UBARR(sc) bus_space_barrier((sc)->iot, (sc)->ioh, 0, (sc)->sc_size, \
 			BUS_SPACE_BARRIER_READ|BUS_SPACE_BARRIER_WRITE)
@@ -385,7 +386,7 @@ void
 uhci_globalreset(uhci_softc_t *sc)
 {
 	UHCICMD(sc, UHCI_CMD_GRESET);	/* global reset */
-	usb_delay_ms(&sc->sc_bus, USB_BUS_RESET_DELAY); /* wait a little */
+	uhci_delay_ms(sc, USB_BUS_RESET_DELAY); /* wait a little */
 	UHCICMD(sc, 0);			/* do nothing */
 }
 
@@ -673,7 +674,7 @@ uhci_power(int why, void *v)
 		UWRITE2(sc, UHCI_INTR, 0); /* disable intrs */
 
 		UHCICMD(sc, cmd | UHCI_CMD_EGSM); /* enter global suspend */
-		usb_delay_ms(&sc->sc_bus, USB_RESUME_WAIT);
+		uhci_delay_ms(sc, USB_RESUME_WAIT);
 		sc->sc_suspend = why;
 		sc->sc_bus.use_polling--;
 		DPRINTF(("uhci_power: cmd=0x%x\n", UREAD2(sc, UHCI_CMD)));
@@ -699,13 +700,13 @@ uhci_power(int why, void *v)
 		UWRITE1(sc, UHCI_SOF, sc->sc_saved_sof);
 
 		UHCICMD(sc, cmd | UHCI_CMD_FGR); /* force global resume */
-		usb_delay_ms(&sc->sc_bus, USB_RESUME_DELAY);
+		uhci_delay_ms(sc, USB_RESUME_DELAY);
 		UHCICMD(sc, cmd & ~UHCI_CMD_EGSM); /* back to normal */
 		UWRITE2(sc, UHCI_INTR, UHCI_INTR_TOCRCIE | UHCI_INTR_RIE |
 			UHCI_INTR_IOCE | UHCI_INTR_SPIE); /* re-enable intrs */
 		UHCICMD(sc, UHCI_CMD_MAXP);
 		uhci_run(sc, 1); /* and start traffic again */
-		usb_delay_ms(&sc->sc_bus, USB_RESUME_RECOVERY);
+		uhci_delay_ms(sc, USB_RESUME_RECOVERY);
 		sc->sc_bus.use_polling--;
 		if (sc->sc_intr_xfer != NULL)
 			callout_reset(&sc->sc_poll_handle, sc->sc_ival,
@@ -1538,7 +1539,7 @@ uhci_waitintr(uhci_softc_t *sc, usbd_xfer_handle xfer)
 
 	xfer->status = USBD_IN_PROGRESS;
 	for (; timo >= 0; timo--) {
-		usb_delay_ms(&sc->sc_bus, 1);
+		uhci_delay_ms(sc, 1);
 		DPRINTFN(20,("uhci_waitintr: 0x%04x\n", UREAD2(sc, UHCI_STS)));
 		if (UREAD2(sc, UHCI_STS) & UHCI_STS_ALLINTRS)
 			uhci_intr1(sc);
@@ -1577,7 +1578,7 @@ uhci_reset(uhci_softc_t *sc)
 	/* The reset bit goes low when the controller is done. */
 	for (n = 0; n < UHCI_RESET_TIMEOUT &&
 		    (UREAD2(sc, UHCI_CMD) & UHCI_CMD_HCRESET); n++)
-		usb_delay_ms(&sc->sc_bus, 1);
+		uhci_delay_ms(sc, 1);
 	if (n >= UHCI_RESET_TIMEOUT)
 		printf("%s: controller did not reset\n",
 		       device_get_nameunit(sc->sc_bus.bdev));
@@ -1607,7 +1608,7 @@ uhci_run(uhci_softc_t *sc, int run)
 				 UREAD2(sc, UHCI_CMD), UREAD2(sc, UHCI_STS)));
 			return (USBD_NORMAL_COMPLETION);
 		}
-		usb_delay_ms(&sc->sc_bus, 1);
+		uhci_delay_ms(sc, 1);
 	}
 	splx(s);
 	printf("%s: cannot %s\n", device_get_nameunit(sc->sc_bus.bdev),
@@ -2075,7 +2076,7 @@ uhci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 	 * use of the xfer.  Also make sure the soft interrupt routine
 	 * has run.
 	 */
-	usb_delay_ms(upipe->pipe.device->bus, 2); /* Hardware finishes in 1ms */
+	uhci_delay_ms(sc, 2); /* Hardware finishes in 1ms */
 	s = splusb();
 #ifdef USB_USE_SOFTINTR
 	sc->sc_softwake = 1;
@@ -2338,7 +2339,7 @@ uhci_device_intr_close(usbd_pipe_handle pipe)
 	 * We now have to wait for any activity on the physical
 	 * descriptors to stop.
 	 */
-	usb_delay_ms(&sc->sc_bus, 2);
+	uhci_delay_ms(sc, 2);
 
 	for(i = 0; i < npoll; i++)
 		uhci_free_sqh(sc, upipe->u.intr.qhs[i]);
@@ -2720,7 +2721,7 @@ uhci_device_isoc_close(usbd_pipe_handle pipe)
 
 	for (i = 0; i < UHCI_VFRAMELIST_COUNT; i++)
 		iso->stds[i]->td.td_status &= htole32(~UHCI_TD_ACTIVE);
-	usb_delay_ms(&sc->sc_bus, 2); /* wait for completion */
+	uhci_delay_ms(sc, 2); /* wait for completion */
 
 	s = splusb();
 	for (i = 0; i < UHCI_VFRAMELIST_COUNT; i++) {
@@ -3246,7 +3247,7 @@ uhci_portreset(uhci_softc_t *sc, int index)
 	x = URWMASK(UREAD2(sc, port));
 	UWRITE2(sc, port, x | UHCI_PORTSC_PR);
 
-	usb_delay_ms(&sc->sc_bus, USB_PORT_ROOT_RESET_DELAY);
+	uhci_delay_ms(sc, USB_PORT_ROOT_RESET_DELAY);
 
 	DPRINTFN(3,("uhci port %d reset, status0 = 0x%04x\n",
 		    index, UREAD2(sc, port)));
@@ -3263,7 +3264,7 @@ uhci_portreset(uhci_softc_t *sc, int index)
 	UWRITE2(sc, port, x  | UHCI_PORTSC_PE);
 
 	for (lim = 10; --lim > 0;) {
-		usb_delay_ms(&sc->sc_bus, USB_PORT_RESET_DELAY);
+		uhci_delay_ms(sc, USB_PORT_RESET_DELAY);
 
 		x = UREAD2(sc, port);
 
@@ -3737,4 +3738,17 @@ uhci_root_intr_close(usbd_pipe_handle pipe)
 	callout_stop(&sc->sc_poll_handle);
 	sc->sc_intr_xfer = NULL;
 	DPRINTF(("uhci_root_intr_close\n"));
+}
+
+static void
+uhci_delay_ms(struct uhci_softc *sc, u_int ms)
+{
+	usbd_bus_handle bus = &sc->sc_bus;
+
+	/* Wait at least two clock ticks so we know the time has passed. */
+	if (bus->use_polling || cold)
+		DELAY((ms+1) * 1000);
+	else
+		msleep(bus, &sc->sc_mtx, PRIBIO, "uhubdly",
+		    (ms * hz + 999) / 1000 + 1);
 }
