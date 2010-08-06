@@ -81,14 +81,23 @@ SYSCTL_INT(_hw_usb_uhub, OID_AUTO, debug, CTLFLAG_RW,
 
 struct uhub_softc {
 	device_t		sc_dev;		/* base device */
+	struct mtx		sc_mtx;
 	usbd_device_handle	sc_hub;		/* USB device */
 	usbd_pipe_handle	sc_ipipe;	/* interrupt pipe */
 	u_int8_t		sc_status[32];	/* max 255 ports */
-	u_char			sc_running;
+	u_char			sc_running;	/* protected by sc_mtx */
 };
 #define UHUB_PROTO(sc) ((sc)->sc_hub->ddesc.bDeviceProtocol)
 #define UHUB_IS_HIGH_SPEED(sc) (UHUB_PROTO(sc) != UDPROTO_FSHUB)
 #define UHUB_IS_SINGLE_TT(sc) (UHUB_PROTO(sc) == UDPROTO_HSHUBSTT)
+
+#define	UHUB_LOCK_INIT(_sc) \
+	mtx_init(&(_sc)->sc_mtx, device_get_nameunit((_sc)->sc_dev), \
+	    NULL, MTX_DEF)
+#define	UHUB_LOCK_DESTROY(_sc)		mtx_destroy(&(_sc)->sc_mtx)
+#define	UHUB_LOCK(_sc)			mtx_lock(&(_sc)->sc_mtx)
+#define	UHUB_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
+#define	UHUB_LOCK_ASSERT(_sc)		mtx_assert(&(_sc)->sc_mtx, MA_OWNED)
 
 static usbd_status uhub_explore(usbd_device_handle hub);
 static void uhub_intr(usbd_xfer_handle, usbd_private_handle,usbd_status);
@@ -188,6 +197,7 @@ uhub_attach(device_t self)
 	DPRINTFN(1,("uhub_attach\n"));
 	sc->sc_hub = dev;
 	sc->sc_dev = self;
+	UHUB_LOCK_INIT(sc);
 
 	if (dev->depth > 0 && UHUB_IS_HIGH_SPEED(sc)) {
 		device_printf(sc->sc_dev, "%s transaction translator%s\n",
@@ -360,7 +370,9 @@ uhub_attach(device_t self)
 
 	/* The usual exploration will finish the setup. */
 
+	UHUB_LOCK(sc);
 	sc->sc_running = 1;
+	UHUB_UNLOCK(sc);
 	return (0);
  bad:
 	if (hub)
@@ -382,12 +394,17 @@ uhub_explore(usbd_device_handle dev)
 
 	DPRINTFN(10, ("uhub_explore dev=%p addr=%d\n", dev, dev->address));
 
-	if (!sc->sc_running)
+	UHUB_LOCK(sc);
+	if (!sc->sc_running) {
+		UHUB_UNLOCK(sc);
 		return (USBD_NOT_STARTED);
+	}
 
 	/* Ignore hubs that are too deep. */
-	if (dev->depth > USB_HUB_MAX_DEPTH)
+	if (dev->depth > USB_HUB_MAX_DEPTH) {
+		UHUB_UNLOCK(sc);
 		return (USBD_TOO_DEEP);
+	}
 
 	for(port = 1; port <= hd->bNbrPorts; port++) {
 		up = &dev->hub->ports[port-1];
@@ -546,6 +563,7 @@ uhub_explore(usbd_device_handle dev)
 				up->device->hub->explore(up->device);
 		}
 	}
+	UHUB_UNLOCK(sc);
 	return (USBD_NORMAL_COMPLETION);
 }
 
@@ -565,7 +583,10 @@ uhub_detach(device_t self)
 	if (hub == NULL)		/* Must be partially working */
 		return (0);
 
+	UHUB_LOCK(sc);
 	sc->sc_running = 0;
+	UHUB_UNLOCK(sc);
+
 	usbd_abort_pipe(sc->sc_ipipe);
 	usbd_close_pipe(sc->sc_ipipe);
 
@@ -582,6 +603,7 @@ uhub_detach(device_t self)
 		free(hub->ports[0].tt, M_USBDEV);
 	free(hub, M_USBDEV);
 	sc->sc_hub->hub = NULL;
+	UHUB_LOCK_DESTROY(sc);
 
 	return (0);
 }
