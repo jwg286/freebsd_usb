@@ -738,16 +738,17 @@ usb_pipe_set_nameunit(usbd_pipe_handle p)
 	usbd_interface_handle iface = p->iface;
 	int buflen;
 
-	buflen = snprintf(NULL, 0, "%s %d %d$",
-	    device_get_nameunit(dev->bus->bdev),
-	    (iface != NULL) ? iface->index : -1, ep->edesc->bEndpointAddress);
+	buflen = snprintf(NULL, 0, "USB pipelock %d%d%d$",
+	    device_get_unit(dev->bus->bdev),
+	    (iface != NULL) ? iface->index : -1,
+	    ep->edesc->bEndpointAddress);
 	if (buflen < 0)
 		return (USBD_NOMEM);
 	p->pipenameunit = malloc(buflen, M_USB, M_NOWAIT | M_ZERO);
 	if (!p->pipenameunit)
 		return (USBD_NOMEM);
-	snprintf(p->pipenameunit, buflen, "%s %d %d",
-	    device_get_nameunit(dev->bus->bdev),
+	snprintf(p->pipenameunit, buflen, "USB pipelock %d%d%d$",
+	    device_get_unit(dev->bus->bdev),
 	    (iface != NULL) ? iface->index : -1, ep->edesc->bEndpointAddress);
 	return (USBD_NORMAL_COMPLETION);
 }
