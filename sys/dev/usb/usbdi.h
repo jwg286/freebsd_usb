@@ -270,6 +270,33 @@ usb_get_iface(device_t dev)
 	return (uap->iface);
 }
 
+/* XXX DELETE ME (just for debugging & testing) */
+static inline int
+usb_splbio_wrapper(const char *func, int lineno)
+{
+
+	printf("%s:%d: TODO\n", func, lineno);
+	return (splbio());
+}
+
+/* XXX DELETE ME (just for debugging & testing) */
+static inline int
+usb_spltty_wrapper(const char *func, int lineno)
+{
+
+	printf("%s:%d: TODO\n", func, lineno);
+	return (spltty());
+}
+
+/* XXX DELETE ME (just for debugging & testing) */
+static inline int
+usb_splnet_wrapper(const char *func, int lineno)
+{
+
+	printf("%s:%d: TODO\n", func, lineno);
+	return (splnet());
+}
+
 /* XXX Perhaps USB should have its own levels? */
 #ifdef USB_USE_SOFTINTR
 #ifdef __HAVE_GENERIC_SOFT_INTERRUPTS
@@ -278,9 +305,13 @@ usb_get_iface(device_t dev)
 #define	splusb splsoftclock
 #endif /* __HAVE_GENERIC_SOFT_INTERRUPTS */
 #else
-#define splusb splbio
+#define splusb() usb_splbio_wrapper(__func__, __LINE__)
 #endif /* USB_USE_SOFTINTR */
-#define splhardusb splbio
+#define splhardusb() usb_splbio_wrapper(__func__, __LINE__)
 #define IPL_USB IPL_BIO
+
+/* XXX DELETE ME (just for debugging & testing) */
+#define	spltty() usb_spltty_wrapper(__func__, __LINE__)
+#define	splnet() usb_splnet_wrapper(__func__, __LINE__)
 
 #endif /* _USBDI_H_ */
