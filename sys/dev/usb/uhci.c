@@ -1278,6 +1278,7 @@ uhci_softintr(void *v)
 	DPRINTFN(10,("%s: uhci_softintr (%d)\n", device_get_nameunit(sc->sc_bus.bdev),
 		     sc->sc_bus.intr_context));
 
+	UHCI_LOCK(sc);
 	sc->sc_bus.intr_context++;
 
 	/*
@@ -1302,6 +1303,7 @@ uhci_softintr(void *v)
 #endif /* USB_USE_SOFTINTR */
 
 	sc->sc_bus.intr_context--;
+	UHCI_UNLOCK(sc);
 }
 
 /* Check for an interrupt. */
