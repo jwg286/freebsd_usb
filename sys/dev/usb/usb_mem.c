@@ -92,11 +92,8 @@ struct usb_frag_dma {
 static bus_dmamap_callback_t usbmem_callback;
 static usbd_status	usb_block_allocmem(usbd_bus_handle, size_t, size_t,
 					   usb_dma_block_t **);
-static void		usb_block_freemem(usb_dma_block_t *);
+static void		usb_block_freemem(usbd_bus_handle, usb_dma_block_t *);
 
-static LIST_HEAD(, usb_dma_block) usb_blk_freelist =
-	LIST_HEAD_INITIALIZER(usb_blk_freelist);
-static int usb_blk_nfree = 0;
 /* XXX should have different free list for different tags (for speed) */
 static LIST_HEAD(, usb_frag_dma) usb_frag_freelist =
 	LIST_HEAD_INITIALIZER(usb_frag_freelist);
@@ -137,11 +134,13 @@ usb_block_allocmem(usbd_bus_handle bus, size_t size, size_t align,
 
 	s = splusb();
 	/* First check the free list. */
-	for (p = LIST_FIRST(&usb_blk_freelist); p; p = LIST_NEXT(p, next)) {
+	for (p = LIST_FIRST(&bus->blk_freelist);
+	     p;
+	     p = LIST_NEXT(p, next)) {
 		if (p->tag == tag && p->size >= size && p->size < size * 2 &&
 		    p->align >= align) {
 			LIST_REMOVE(p, next);
-			usb_blk_nfree--;
+			bus->blk_nfree--;
 			splx(s);
 			*dmap = p;
 			DPRINTFN(6,("usb_block_allocmem: free list size=%lu\n",
@@ -205,14 +204,14 @@ free:
  * XXX when should we really free?
  */
 static void
-usb_block_freemem(usb_dma_block_t *p)
+usb_block_freemem(usbd_bus_handle bus, usb_dma_block_t *p)
 {
 	int s;
 
 	DPRINTFN(6, ("usb_block_freemem: size=%lu\n", (u_long)p->size));
 	s = splusb();
-	LIST_INSERT_HEAD(&usb_blk_freelist, p, next);
-	usb_blk_nfree++;
+	LIST_INSERT_HEAD(&bus->blk_freelist, p, next);
+	bus->blk_nfree++;
 	splx(s);
 }
 
@@ -285,7 +284,7 @@ usb_freemem(usbd_bus_handle bus, usb_dma_t *p)
 
 	if (p->block->fullblock) {
 		DPRINTFN(1, ("usb_freemem: large free\n"));
-		usb_block_freemem(p->block);
+		usb_block_freemem(bus, p->block);
 		return;
 	}
 	f = KERNADDR(p, 0);
