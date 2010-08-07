@@ -346,6 +346,7 @@ uhci_pci_attach(device_t self)
 	}
 	device_set_ivars(sc->sc_bus.bdev, &sc->sc_bus);
 	UHCI_LOCK_INIT(sc);
+	LIST_INIT(&sc->sc_bus.blk_freelist);
 
 	/* uhci_pci_match must never return NULL if uhci_pci_probe succeeded */
 	device_set_desc(sc->sc_bus.bdev, uhci_pci_match(self));

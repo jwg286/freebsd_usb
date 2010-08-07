@@ -102,6 +102,12 @@ struct slhci_softc {
 	int				sc_change;
 };
 
+#define	SLHCI_LOCK_INIT(_sc)	USB_BUS_LOCK_INIT(&(_sc)->sc_bus)
+#define	SLHCI_LOCK_DESTROY(_sc)	USB_BUS_LOCK_DESTROY(&(_sc)->sc_bus)
+#define	SLHCI_LOCK(_sc)		USB_BUS_LOCK(&(_sc)->sc_bus)
+#define	SLHCI_UNLOCK(_sc)	USB_BUS_UNLOCK(&(_sc)->sc_bus)
+#define	SLHCI_LOCK_ASSERT(_sc)	USB_BUS_LOCK_ASSERT(&(_sc)->sc_bus)
+
 int  sl811hs_find(struct slhci_softc *);
 int  slhci_attach(struct slhci_softc *);
 int  slhci_intr(void *);

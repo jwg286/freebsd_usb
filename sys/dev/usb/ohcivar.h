@@ -146,6 +146,12 @@ typedef struct ohci_softc {
 	char sc_dying;
 } ohci_softc_t;
 
+#define	OHCI_LOCK_INIT(_sc)	USB_BUS_LOCK_INIT(&(_sc)->sc_bus)
+#define	OHCI_LOCK_DESTROY(_sc)	USB_BUS_LOCK_DESTROY(&(_sc)->sc_bus)
+#define	OHCI_LOCK(_sc)		USB_BUS_LOCK(&(_sc)->sc_bus)
+#define	OHCI_UNLOCK(_sc)	USB_BUS_UNLOCK(&(_sc)->sc_bus)
+#define	OHCI_LOCK_ASSERT(_sc)	USB_BUS_LOCK_ASSERT(&(_sc)->sc_bus)
+
 struct ohci_xfer {
 	struct usbd_xfer xfer;
 	struct usb_task	abort_task;

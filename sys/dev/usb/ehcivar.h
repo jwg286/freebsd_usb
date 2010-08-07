@@ -163,6 +163,12 @@ typedef struct ehci_softc {
 #endif
 } ehci_softc_t;
 
+#define	EHCI_LOCK_INIT(_sc)	USB_BUS_LOCK_INIT(&(_sc)->sc_bus)
+#define	EHCI_LOCK_DESTROY(_sc)	USB_BUS_LOCK_DESTROY(&(_sc)->sc_bus)
+#define	EHCI_LOCK(_sc)		USB_BUS_LOCK(&(_sc)->sc_bus)
+#define	EHCI_UNLOCK(_sc)	USB_BUS_UNLOCK(&(_sc)->sc_bus)
+#define	EHCI_LOCK_ASSERT(_sc)	USB_BUS_LOCK_ASSERT(&(_sc)->sc_bus)
+
 #define EREAD1(sc, a) bus_space_read_1((sc)->iot, (sc)->ioh, (a))
 #define EREAD2(sc, a) bus_space_read_2((sc)->iot, (sc)->ioh, (a))
 #define EREAD4(sc, a) bus_space_read_4((sc)->iot, (sc)->ioh, (a))

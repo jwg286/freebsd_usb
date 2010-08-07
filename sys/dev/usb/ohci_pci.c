@@ -258,6 +258,8 @@ ohci_pci_attach(device_t self)
 		return ENOMEM;
 	}
 	device_set_ivars(sc->sc_bus.bdev, &sc->sc_bus);
+	OHCI_LOCK_INIT(sc);
+	LIST_INIT(&sc->sc_bus.blk_freelist);
 
 	/* ohci_pci_match will never return NULL if ohci_pci_probe succeeded */
 	device_set_desc(sc->sc_bus.bdev, ohci_pci_match(self));
