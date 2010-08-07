@@ -138,7 +138,7 @@ usb_block_allocmem(usbd_bus_handle bus, size_t size, size_t align,
 	for (p = LIST_FIRST(&bus->blk_freelist);
 	     p;
 	     p = LIST_NEXT(p, next)) {
-		if (p->tag == tag && p->size >= size && p->size < size * 2 &&
+		if (p->size >= size && p->size < size * 2 &&
 		    p->align >= align) {
 			LIST_REMOVE(p, next);
 			bus->blk_nfree--;
@@ -181,15 +181,8 @@ usb_block_allocmem(usbd_bus_handle bus, size_t size, size_t align,
 	    usbmem_callback, p, 0))
 		goto memfree;
 
-	/* XXX - override the tag, ok since we never free it */
-	p->tag = tag;
 	*dmap = p;
 	return (USBD_NORMAL_COMPLETION);
-
-	/*
-	 * XXX - do we need to _unload? is the order of _free and _destroy
-	 * correct?
-	 */
 memfree:
 	bus_dmamem_free(p->tag, p->kaddr, p->map);
 tagfree:
