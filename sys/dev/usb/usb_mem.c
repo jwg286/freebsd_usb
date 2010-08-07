@@ -90,7 +90,7 @@ struct usb_frag_dma {
 };
 
 static bus_dmamap_callback_t usbmem_callback;
-static usbd_status	usb_block_allocmem(bus_dma_tag_t, size_t, size_t,
+static usbd_status	usb_block_allocmem(usbd_bus_handle, size_t, size_t,
 					   usb_dma_block_t **);
 static void		usb_block_freemem(usb_dma_block_t *);
 
@@ -118,9 +118,10 @@ usbmem_callback(void *arg, bus_dma_segment_t *segs, int nseg, int error)
 }
 
 static usbd_status
-usb_block_allocmem(bus_dma_tag_t tag, size_t size, size_t align,
+usb_block_allocmem(usbd_bus_handle bus, size_t size, size_t align,
 		   usb_dma_block_t **dmap)
 {
+	bus_dma_tag_t tag = bus->parent_dmatag;
         usb_dma_block_t *p;
 	int s;
 
@@ -233,7 +234,7 @@ usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 	if (size > USB_MEM_SMALL || align > USB_MEM_SMALL) {
 		DPRINTFN(1, ("usb_allocmem: large alloc %d\n", (int)size));
 		size = (size + USB_MEM_BLOCK - 1) & ~(USB_MEM_BLOCK - 1);
-		err = usb_block_allocmem(tag, size, align, &p->block);
+		err = usb_block_allocmem(bus, size, align, &p->block);
 		if (!err) {
 			p->block->fullblock = 1;
 			p->offs = 0;
@@ -249,7 +250,7 @@ usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 			break;
 	if (f == NULL) {
 		DPRINTFN(1, ("usb_allocmem: adding fragments\n"));
-		err = usb_block_allocmem(tag, USB_MEM_BLOCK, USB_MEM_SMALL,&b);
+		err = usb_block_allocmem(bus, USB_MEM_BLOCK, USB_MEM_SMALL,&b);
 		if (err) {
 			splx(s);
 			return (err);
