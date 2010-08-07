@@ -94,6 +94,8 @@ struct usb_frag_dma {
 static bus_dmamap_callback_t usbmem_callback;
 static usbd_status	usb_block_allocmem(usbd_bus_handle, size_t, size_t,
 					   usb_dma_block_t **);
+static usbd_status	usb_block_allocmem_locked(usbd_bus_handle, size_t,
+					   size_t, usb_dma_block_t **);
 static void		usb_block_freemem(usbd_bus_handle, usb_dma_block_t *);
 
 static void
@@ -114,7 +116,19 @@ usbmem_callback(void *arg, bus_dma_segment_t *segs, int nseg, int error)
 
 static usbd_status
 usb_block_allocmem(usbd_bus_handle bus, size_t size, size_t align,
-		   usb_dma_block_t **dmap)
+    usb_dma_block_t **dmap)
+{
+	usbd_status err;
+
+	USB_BUS_LOCK(bus);
+	err = usb_block_allocmem_locked(bus, size, align, dmap);
+	USB_BUS_UNLOCK(bus);
+	return (err);
+}
+
+static usbd_status
+usb_block_allocmem_locked(usbd_bus_handle bus, size_t size, size_t align,
+    usb_dma_block_t **dmap)
 {
 	bus_dma_tag_t tag = bus->parent_dmatag;
         usb_dma_block_t *p;
@@ -129,7 +143,8 @@ usb_block_allocmem(usbd_bus_handle bus, size_t size, size_t align,
 	}
 #endif
 
-	USB_BUS_LOCK(bus);
+	USB_BUS_LOCK_ASSERT(bus);
+
 	/* First check the free list. */
 	for (p = LIST_FIRST(&bus->blk_freelist);
 	     p;
@@ -138,14 +153,12 @@ usb_block_allocmem(usbd_bus_handle bus, size_t size, size_t align,
 		    p->align >= align) {
 			LIST_REMOVE(p, next);
 			bus->blk_nfree--;
-			USB_BUS_UNLOCK(bus);
 			*dmap = p;
 			DPRINTFN(6,("usb_block_allocmem: free list size=%lu\n",
 				    (u_long)p->size));
 			return (USBD_NORMAL_COMPLETION);
 		}
 	}
-	USB_BUS_UNLOCK(bus);
 
 #ifdef DIAGNOSTIC
 	if (!curproc) {
@@ -207,12 +220,10 @@ usb_block_freemem(usbd_bus_handle bus, usb_dma_block_t *p)
 usbd_status
 usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 {
-	bus_dma_tag_t tag = bus->parent_dmatag;
 	usbd_status err;
 	struct usb_frag_dma *f;
 	usb_dma_block_t *b;
 	int i;
-	int s;
 
 	/* compat w/ Net/OpenBSD */
 	if (align == 0)
@@ -231,13 +242,14 @@ usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 		return (err);
 	}
 
-	s = splusb();
+	USB_BUS_LOCK(bus);
 	/* Check for free fragments. */
 	if ((f = LIST_FIRST(&bus->frag_freelist)) == NULL) {
 		DPRINTFN(1, ("usb_allocmem: adding fragments\n"));
-		err = usb_block_allocmem(bus, USB_MEM_BLOCK, USB_MEM_SMALL,&b);
+		err = usb_block_allocmem_locked(bus, USB_MEM_BLOCK,
+		    USB_MEM_SMALL,&b);
 		if (err) {
-			splx(s);
+			USB_BUS_UNLOCK(bus);
 			return (err);
 		}
 		b->fullblock = 0;
@@ -255,7 +267,7 @@ usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 	p->offs = f->offs;
 	p->len = USB_MEM_SMALL;
 	LIST_REMOVE(f, next);
-	splx(s);
+	USB_BUS_UNLOCK(bus);
 	DPRINTFN(5, ("usb_allocmem: use frag=%p size=%d\n", f, (int)size));
 	return (USBD_NORMAL_COMPLETION);
 }
@@ -264,7 +276,6 @@ void
 usb_freemem(usbd_bus_handle bus, usb_dma_t *p)
 {
 	struct usb_frag_dma *f;
-	int s;
 
 	if (p->block->fullblock) {
 		DPRINTFN(1, ("usb_freemem: large free\n"));
@@ -274,8 +285,8 @@ usb_freemem(usbd_bus_handle bus, usb_dma_t *p)
 	f = KERNADDR(p, 0);
 	f->block = p->block;
 	f->offs = p->offs;
-	s = splusb();
+	USB_BUS_LOCK(bus);
 	LIST_INSERT_HEAD(&bus->frag_freelist, f, next);
-	splx(s);
+	USB_BUS_UNLOCK(bus);
 	DPRINTFN(5, ("usb_freemem: frag=%p\n", f));
 }
