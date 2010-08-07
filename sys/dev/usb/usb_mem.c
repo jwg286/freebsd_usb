@@ -233,10 +233,7 @@ usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 
 	s = splusb();
 	/* Check for free fragments. */
-	for (f = LIST_FIRST(&bus->frag_freelist); f; f = LIST_NEXT(f, next))
-		if (f->block->tag == tag)
-			break;
-	if (f == NULL) {
+	if ((f = LIST_FIRST(&bus->frag_freelist)) == NULL) {
 		DPRINTFN(1, ("usb_allocmem: adding fragments\n"));
 		err = usb_block_allocmem(bus, USB_MEM_BLOCK, USB_MEM_SMALL,&b);
 		if (err) {
@@ -244,8 +241,6 @@ usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 			return (err);
 		}
 		b->fullblock = 0;
-		/* XXX - override the tag, ok since we never free it */
-		b->tag = tag;
 		KASSERT(sizeof *f <= USB_MEM_SMALL, ("USB_MEM_SMALL(%d) is too small for struct usb_frag_dma(%zd)\n",
 		    USB_MEM_SMALL, sizeof *f));
 		for (i = 0; i < USB_MEM_BLOCK; i += USB_MEM_SMALL) {
