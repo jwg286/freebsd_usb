@@ -144,7 +144,6 @@ d_poll_t usbpoll;
 
 struct cdevsw usb_cdevsw = {
 	.d_version =	D_VERSION,
-	.d_flags =	D_NEEDGIANT,
 	.d_open =	usbopen,
 	.d_close =	usbclose,
 	.d_read =	usbread,
@@ -540,10 +539,14 @@ usbopen(struct cdev *dev, int flag, int mode, struct thread *p)
 	struct usb_softc *sc;
 
 	if (unit == USB_DEV_MINOR) {
-		if (usb_dev_open)
+		mtx_lock(&usbevent_mtx);
+		if (usb_dev_open) {
+			mtx_unlock(&usbevent_mtx);
 			return (EBUSY);
+		}
 		usb_dev_open = 1;
 		usb_async_proc = 0;
+		mtx_unlock(&usbevent_mtx);
 		return (0);
 	}
 	sc = devclass_get_softc(usb_devclass, unit);
@@ -596,8 +599,10 @@ usbclose(struct cdev *dev, int flag, int mode, struct thread *p)
 	int unit = USBUNIT(dev);
 
 	if (unit == USB_DEV_MINOR) {
+		mtx_lock(&usbevent_mtx);
 		usb_async_proc = 0;
 		usb_dev_open = 0;
+		mtx_unlock(&usbevent_mtx);
 	}
 
 	return (0);
@@ -616,10 +621,12 @@ usbioctl(struct cdev *devt, u_long cmd, caddr_t data, int flag, struct thread *p
 			return (0);
 
 		case FIOASYNC:
+			mtx_lock(&usbevent_mtx);
 			if (*(int *)data)
 				usb_async_proc = p->td_proc;
 			else
 				usb_async_proc = 0;
+			mtx_lock(&usbevent_mtx);
 			return (0);
 
 		default:
