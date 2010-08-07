@@ -107,6 +107,7 @@ struct usbd_bus {
 	struct mtx		mtx;
 	LIST_HEAD(, usb_dma_block)	blk_freelist;
 	int			blk_nfree;
+	LIST_HEAD(, usb_frag_dma)	frag_freelist;
 	struct usbd_bus_methods	*methods;
 	u_int32_t		pipe_size; /* size of a pipe struct */
 	/* Filled by usb driver */

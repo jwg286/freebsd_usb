@@ -96,10 +96,6 @@ static usbd_status	usb_block_allocmem(usbd_bus_handle, size_t, size_t,
 					   usb_dma_block_t **);
 static void		usb_block_freemem(usbd_bus_handle, usb_dma_block_t *);
 
-/* XXX should have different free list for different tags (for speed) */
-static LIST_HEAD(, usb_frag_dma) usb_frag_freelist =
-	LIST_HEAD_INITIALIZER(usb_frag_freelist);
-
 static void
 usbmem_callback(void *arg, bus_dma_segment_t *segs, int nseg, int error)
 {
@@ -237,7 +233,7 @@ usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 
 	s = splusb();
 	/* Check for free fragments. */
-	for (f = LIST_FIRST(&usb_frag_freelist); f; f = LIST_NEXT(f, next))
+	for (f = LIST_FIRST(&bus->frag_freelist); f; f = LIST_NEXT(f, next))
 		if (f->block->tag == tag)
 			break;
 	if (f == NULL) {
@@ -256,9 +252,9 @@ usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 			f = (struct usb_frag_dma *)((char *)b->kaddr + i);
 			f->block = b;
 			f->offs = i;
-			LIST_INSERT_HEAD(&usb_frag_freelist, f, next);
+			LIST_INSERT_HEAD(&bus->frag_freelist, f, next);
 		}
-		f = LIST_FIRST(&usb_frag_freelist);
+		f = LIST_FIRST(&bus->frag_freelist);
 	}
 	p->block = f->block;
 	p->offs = f->offs;
@@ -284,7 +280,7 @@ usb_freemem(usbd_bus_handle bus, usb_dma_t *p)
 	f->block = p->block;
 	f->offs = p->offs;
 	s = splusb();
-	LIST_INSERT_HEAD(&usb_frag_freelist, f, next);
+	LIST_INSERT_HEAD(&bus->frag_freelist, f, next);
 	splx(s);
 	DPRINTFN(5, ("usb_freemem: frag=%p\n", f));
 }
