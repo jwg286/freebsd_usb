@@ -158,6 +158,8 @@ static void	usb_create_event_thread(void *);
 static void	usb_event_thread(void *);
 static void	usb_task_thread(void *);
 
+struct mtx usbevent_mtx;
+static int usb_inited;
 static struct cdev *usb_dev;		/* The /dev/usb device. */
 static int usb_ndevs;			/* Number of /dev/usbN devices. */
 /* Busses to explore at the end of boot-time device configuration. */
@@ -178,6 +180,7 @@ static int usb_dev_open = 0;
 static void usb_add_event(int, struct usb_event *, device_t);
 
 static int usb_get_next_event(struct usb_event *);
+static int usb_modevent(module_t, int, void *);
 
 static const char *usbrev_str[] = USBREV_STR;
 
@@ -209,11 +212,35 @@ static driver_t usb_driver = {
 
 static devclass_t usb_devclass;
 
-DRIVER_MODULE(usb, ohci, usb_driver, usb_devclass, 0, 0);
-DRIVER_MODULE(usb, uhci, usb_driver, usb_devclass, 0, 0);
-DRIVER_MODULE(usb, ehci, usb_driver, usb_devclass, 0, 0);
-DRIVER_MODULE(usb, slhci, usb_driver, usb_devclass, 0, 0);
+DRIVER_MODULE(usb, ohci, usb_driver, usb_devclass, usb_modevent, 0);
+DRIVER_MODULE(usb, uhci, usb_driver, usb_devclass, usb_modevent, 0);
+DRIVER_MODULE(usb, ehci, usb_driver, usb_devclass, usb_modevent, 0);
+DRIVER_MODULE(usb, slhci, usb_driver, usb_devclass, usb_modevent, 0);
 MODULE_VERSION(usb, 1);
+
+static int
+usb_modevent(module_t mode, int type, void *data)
+{
+
+	switch (type) {
+	case MOD_LOAD:
+		if (atomic_cmpset_int(&usb_inited, 0, 1))
+			mtx_init(&usbevent_mtx, "USB common lock", NULL,
+			    MTX_DEF);
+		else
+			atomic_add_int(&usb_inited, 1);
+		break;
+	case MOD_UNLOAD:
+		if (atomic_cmpset_int(&usb_inited, 1, 0))
+			mtx_destroy(&usbevent_mtx);
+		else
+			atomic_add_int(&usb_inited, -1);
+		break;
+	default:
+		return (EOPNOTSUPP);
+	}
+	return (0);
+}
 
 static int
 usb_match(device_t self)
@@ -533,7 +560,7 @@ usbread(struct cdev *dev, struct uio *uio, int flag)
 {
 	struct usb_event ue;
 	int unit = USBUNIT(dev);
-	int s, error, n;
+	int error, n;
 
 	if (unit != USB_DEV_MINOR)
 		return (ENODEV);
@@ -542,7 +569,7 @@ usbread(struct cdev *dev, struct uio *uio, int flag)
 		return (EINVAL);
 
 	error = 0;
-	s = splusb();
+	mtx_lock(&usbevent_mtx);
 	for (;;) {
 		n = usb_get_next_event(&ue);
 		if (n != 0)
@@ -551,11 +578,12 @@ usbread(struct cdev *dev, struct uio *uio, int flag)
 			error = EWOULDBLOCK;
 			break;
 		}
-		error = tsleep(&usb_events, PZERO | PCATCH, "usbrea", 0);
+		error = msleep(&usb_events, &usbevent_mtx, PZERO | PCATCH,
+		    "usbrea", 0);
 		if (error)
 			break;
 	}
-	splx(s);
+	mtx_unlock(&usbevent_mtx);
 	if (!error)
 		error = uiomove((void *)&ue, uio->uio_resid, uio);
 
@@ -690,19 +718,19 @@ usbioctl(struct cdev *devt, u_long cmd, caddr_t data, int flag, struct thread *p
 int
 usbpoll(struct cdev *dev, int events, struct thread *p)
 {
-	int revents, mask, s;
+	int revents, mask;
 	int unit = USBUNIT(dev);
 
 	if (unit == USB_DEV_MINOR) {
 		revents = 0;
 		mask = POLLIN | POLLRDNORM;
 
-		s = splusb();
+		mtx_lock(&usbevent_mtx);
 		if (events & mask && usb_nevents > 0)
 			revents |= events & mask;
 		if (revents == 0 && events & mask)
 			selrecord(p, &usb_selevent);
-		splx(s);
+		mtx_unlock(&usbevent_mtx);
 
 		return (revents);
 	} else {
@@ -748,11 +776,12 @@ usb_needs_explore(usbd_device_handle dev)
 	wakeup(&dev->bus->needs_explore);
 }
 
-/* Called at splusb() */
 int
 usb_get_next_event(struct usb_event *ue)
 {
 	struct usb_event_q *ueq;
+
+	mtx_assert(&usbevent_mtx, MA_OWNED);
 
 	if (usb_nevents <= 0)
 		return (0);
@@ -797,7 +826,6 @@ usb_add_event(int type, struct usb_event *uep, device_t dev)
 	struct usb_event_q *ueq;
 	struct usb_event ue;
 	struct timeval thetime;
-	int s;
 
 	ueq = malloc(sizeof *ueq, M_USBDEV, M_NOWAIT);
 	if (ueq == NULL) {
@@ -810,7 +838,7 @@ usb_add_event(int type, struct usb_event *uep, device_t dev)
 	microtime(&thetime);
 	TIMEVAL_TO_TIMESPEC(&thetime, &ueq->ue.ue_time);
 
-	s = splusb();
+	mtx_lock(&usbevent_mtx);
 	if (USB_EVENT_IS_DETACH(type)) {
 		struct usb_event_q *ueqi, *ueqi_next;
 
@@ -839,7 +867,7 @@ usb_add_event(int type, struct usb_event *uep, device_t dev)
 		psignal(usb_async_proc, SIGIO);
 		PROC_UNLOCK(usb_async_proc);
 	}
-	splx(s);
+	mtx_unlock(&usbevent_mtx);
 }
 
 void
