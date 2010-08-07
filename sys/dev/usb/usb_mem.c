@@ -55,6 +55,8 @@ __FBSDID("$FreeBSD: stable/7/sys/dev/usb/usb_mem.c 170960 2007-06-20 05:11:37Z i
 #include <sys/endian.h>
 #include <sys/module.h>
 #include <sys/bus.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
 #include <sys/queue.h>
 
 #include <machine/bus.h>
@@ -120,7 +122,6 @@ usb_block_allocmem(usbd_bus_handle bus, size_t size, size_t align,
 {
 	bus_dma_tag_t tag = bus->parent_dmatag;
         usb_dma_block_t *p;
-	int s;
 
 	DPRINTFN(5, ("usb_block_allocmem: size=%lu align=%lu\n",
 		     (u_long)size, (u_long)align));
@@ -132,7 +133,7 @@ usb_block_allocmem(usbd_bus_handle bus, size_t size, size_t align,
 	}
 #endif
 
-	s = splusb();
+	USB_BUS_LOCK(bus);
 	/* First check the free list. */
 	for (p = LIST_FIRST(&bus->blk_freelist);
 	     p;
@@ -141,14 +142,14 @@ usb_block_allocmem(usbd_bus_handle bus, size_t size, size_t align,
 		    p->align >= align) {
 			LIST_REMOVE(p, next);
 			bus->blk_nfree--;
-			splx(s);
+			USB_BUS_UNLOCK(bus);
 			*dmap = p;
 			DPRINTFN(6,("usb_block_allocmem: free list size=%lu\n",
 				    (u_long)p->size));
 			return (USBD_NORMAL_COMPLETION);
 		}
 	}
-	splx(s);
+	USB_BUS_UNLOCK(bus);
 
 #ifdef DIAGNOSTIC
 	if (!curproc) {
@@ -206,13 +207,12 @@ free:
 static void
 usb_block_freemem(usbd_bus_handle bus, usb_dma_block_t *p)
 {
-	int s;
 
 	DPRINTFN(6, ("usb_block_freemem: size=%lu\n", (u_long)p->size));
-	s = splusb();
+	USB_BUS_LOCK(bus);
 	LIST_INSERT_HEAD(&bus->blk_freelist, p, next);
 	bus->blk_nfree++;
-	splx(s);
+	USB_BUS_UNLOCK(bus);
 }
 
 usbd_status
