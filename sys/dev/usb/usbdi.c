@@ -48,7 +48,9 @@ __FBSDID("$FreeBSD: stable/7/sys/dev/usb/usbdi.c 190251 2009-03-22 06:37:14Z n_h
 #if defined(DIAGNOSTIC) && defined(__i386__)
 #include <machine/cpu.h>
 #endif
+#include <sys/lock.h>
 #include <sys/malloc.h>
+#include <sys/mutex.h>
 #include <sys/proc.h>
 
 #include <machine/bus.h>
@@ -271,6 +273,7 @@ usbd_close_pipe(usbd_pipe_handle pipe)
 	pipe->methods->close(pipe);
 	if (pipe->intrxfer != NULL)
 		usbd_free_xfer(pipe->intrxfer);
+	USB_PIPE_LOCK_DESTROY(pipe);
 	free(pipe, M_USB);
 	return (USBD_NORMAL_COMPLETION);
 }
