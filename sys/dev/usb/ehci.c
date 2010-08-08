@@ -2184,16 +2184,15 @@ ehci_root_intr_start(usbd_xfer_handle xfer)
 static void
 ehci_root_intr_abort(usbd_xfer_handle xfer)
 {
-	int s;
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	if (xfer->pipe->intrxfer == xfer) {
 		DPRINTF(("ehci_root_intr_abort: remove\n"));
 		xfer->pipe->intrxfer = NULL;
 	}
 	xfer->status = USBD_CANCELLED;
-	s = splusb();
 	usb_transfer_complete(xfer);
-	splx(s);
 }
 
 /* Close the root pipe. */
