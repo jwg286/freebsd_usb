@@ -1435,11 +1435,13 @@ usb_disconnect_port(struct usbd_port *up, device_t parent, int detaching)
 			if (detaching == 0) {
 				struct usb_attach_arg *uaap =
 				    device_get_ivars(dev->subdevs[i]);
+				mtx_lock(&Giant);
 				device_detach(dev->subdevs[i]);
 				free(uaap, M_USB);
 				device_delete_child(
 				    device_get_parent(dev->subdevs[i]),
 				    dev->subdevs[i]);
+				mtx_unlock(&Giant);
 			}
 			dev->subdevs[i] = NULL;
 		}
