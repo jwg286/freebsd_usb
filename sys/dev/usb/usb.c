@@ -132,7 +132,14 @@ struct usb_taskq {
 	struct proc *task_thread_proc;
 	const char *name;
 	int taskcreated;		/* task thread exists. */
+	struct mtx mtx;
 };
+
+#define	USB_TASKQ_LOCK_INIT(_taskq, _name)			  \
+	mtx_init(&(_taskq)->mtx, (_name), NULL, MTX_DEF)
+#define	USB_TASKQ_LOCK_DESTROY(_taskq)	mtx_destroy(&(_taskq)->mtx)
+#define	USB_TASKQ_LOCK(_taskq)		mtx_lock(&(_taskq)->mtx)
+#define	USB_TASKQ_UNLOCK(_taskq)	mtx_unlock(&(_taskq)->mtx)
 
 static struct usb_taskq usb_taskq[USB_NUM_TASKQS];
 
@@ -376,6 +383,7 @@ usb_create_event_thread(void *arg)
 			taskq->taskcreated = 1;
 			taskq->name = taskq_names[i];
 			TAILQ_INIT(&taskq->tasks);
+			USB_TASKQ_LOCK_INIT(taskq, taskq_names[i]);
 			if (kproc_create(usb_task_thread, taskq,
 			    &taskq->task_thread_proc, RFHIGHPID, 0,
 			    taskq->name))
@@ -494,35 +502,31 @@ usb_task_thread(void *arg)
 {
 	struct usb_task *task;
 	struct usb_taskq *taskq;
-	int s;
-
-	mtx_lock(&Giant);
 
 	taskq = arg;
 	DPRINTF(("usb_task_thread: start taskq %s\n", taskq->name));
 
-	s = splusb();
+	USB_TASKQ_LOCK(taskq);
 	while (usb_ndevs > 0) {
 		task = TAILQ_FIRST(&taskq->tasks);
 		if (task == NULL) {
-			tsleep(&taskq->tasks, PWAIT, "usbtsk", 0);
+			msleep(&taskq->tasks, &taskq->mtx, PWAIT, "usbtsk", 0);
 			task = TAILQ_FIRST(&taskq->tasks);
 		}
 		DPRINTFN(2,("usb_task_thread: woke up task=%p\n", task));
 		if (task != NULL) {
 			TAILQ_REMOVE(&taskq->tasks, task, next);
 			task->queue = -1;
-			splx(s);
+			USB_TASKQ_UNLOCK(taskq);
 			task->fun(task->arg);
-			s = splusb();
+			USB_TASKQ_LOCK(taskq);
 		}
 	}
-	splx(s);
+	USB_TASKQ_UNLOCK(taskq);
 
 	taskq->taskcreated = 0;
 	wakeup(&taskq->taskcreated);
-
-	mtx_unlock(&Giant);
+	USB_TASKQ_LOCK_DESTROY(taskq);
 
 	DPRINTF(("usb_event_thread: exit\n"));
 	kproc_exit(0);
