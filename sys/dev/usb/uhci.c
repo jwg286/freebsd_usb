@@ -1060,13 +1060,13 @@ uhci_add_ls_ctrl(uhci_softc_t *sc, uhci_soft_qh_t *sqh)
 	sc->sc_lctl_end = sqh;
 }
 
-/* Remove low speed control QH, called at splusb(). */
+/* Remove low speed control QH. */
 void
 uhci_remove_ls_ctrl(uhci_softc_t *sc, uhci_soft_qh_t *sqh)
 {
 	uhci_soft_qh_t *pqh;
 
-	SPLUSBCHECK;
+	UHCI_LOCK_ASSERT(sc);
 
 	DPRINTFN(10, ("uhci_remove_ls_ctrl: sqh=%p\n", sqh));
 	/* See comment in uhci_remove_hs_ctrl() */
