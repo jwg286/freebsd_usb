@@ -770,14 +770,10 @@ usb_discover(void *v)
 	 * but this is guaranteed since this function is only called
 	 * from the event thread for the controller.
 	 */
-	s = splusb();
 	while (sc->sc_bus->needs_explore && !sc->sc_dying) {
 		sc->sc_bus->needs_explore = 0;
-		splx(s);
 		sc->sc_bus->root_hub->hub->explore(sc->sc_bus->root_hub);
-		s = splusb();
 	}
-	splx(s);
 }
 
 void
