@@ -364,7 +364,9 @@ usbd_start_transfer(void *arg, bus_dma_segment_t *segs, int nseg, int error)
 		/* XXX */
 		usb_insert_transfer(xfer);
 		xfer->status = USBD_IOERROR;
+		USB_PIPE_LOCK(pipe);
 		usb_transfer_complete(xfer);
+		USB_PIPE_UNLOCK(pipe);
 		return;
 	}
 
@@ -405,7 +407,9 @@ usbd_start_transfer(void *arg, bus_dma_segment_t *segs, int nseg, int error)
 			xfer->rqflags &= ~URQ_AUTO_DMABUF;
 		}
 		xfer->status = err;
+		USB_PIPE_LOCK(pipe);
 		usb_transfer_complete(xfer);
+		USB_PIPE_UNLOCK(pipe);
 		return;
 	}
 }
