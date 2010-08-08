@@ -277,6 +277,8 @@ usb_freemem(usbd_bus_handle bus, usb_dma_t *p)
 {
 	struct usb_frag_dma *f;
 
+	USB_BUS_LOCK_ASSERT(bus);
+
 	if (p->block->fullblock) {
 		DPRINTFN(1, ("usb_freemem: large free\n"));
 		usb_block_freemem(bus, p->block);
@@ -285,8 +287,6 @@ usb_freemem(usbd_bus_handle bus, usb_dma_t *p)
 	f = KERNADDR(p, 0);
 	f->block = p->block;
 	f->offs = p->offs;
-	USB_BUS_LOCK(bus);
 	LIST_INSERT_HEAD(&bus->frag_freelist, f, next);
-	USB_BUS_UNLOCK(bus);
 	DPRINTFN(5, ("usb_freemem: frag=%p\n", f));
 }
