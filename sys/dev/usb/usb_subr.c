@@ -898,10 +898,14 @@ usbd_probe_and_attach(device_t parent, usbd_device_handle dev,
 	*uaap = uaa;
 	usbd_devinfo(dev, 1, devinfo);
 	device_set_desc_copy(bdev, devinfo);
+	/* calling device_probe_and_attach() requires Giant. */
+	mtx_lock(&Giant);
 	if (device_probe_and_attach(bdev) == 0) {
+		mtx_unlock(&Giant);
 		free(devinfo, M_USB);
 		return (USBD_NORMAL_COMPLETION);
 	}
+	mtx_unlock(&Giant);
 
 	/*
 	 * Free subdevs so we can reallocate it larger for the number of
@@ -961,7 +965,10 @@ usbd_probe_and_attach(device_t parent, usbd_device_handle dev,
 			*uaap = uaa;
 			usbd_devinfo(dev, 1, devinfo);
 			device_set_desc_copy(bdev, devinfo);
+			/* calling device_probe_and_attach() requires Giant. */
+			mtx_lock(&Giant);
 			if (device_probe_and_attach(bdev) == 0) {
+				mtx_unlock(&Giant);
 				ifaces[i] = 0; /* consumed */
 				found++;
 				/* create another child for the next iface */
@@ -979,6 +986,7 @@ usbd_probe_and_attach(device_t parent, usbd_device_handle dev,
 				}
 				device_set_ivars(bdev, uaap);
 			} else {
+				mtx_unlock(&Giant);
 				dev->subdevs[found] = 0;
 			}
 		}
@@ -1019,6 +1027,7 @@ usbd_probe_and_attach(device_t parent, usbd_device_handle dev,
 	usbd_devinfo(dev, 1, devinfo);
 	device_set_desc_copy(bdev, devinfo);
 	free(devinfo, M_USB);
+	/* calling device_probe_and_attach() requires Giant. */
 	mtx_lock(&Giant);
 	if (device_probe_and_attach(bdev) == 0) {
 		mtx_unlock(&Giant);
