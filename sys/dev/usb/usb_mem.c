@@ -210,11 +210,11 @@ static void
 usb_block_freemem(usbd_bus_handle bus, usb_dma_block_t *p)
 {
 
+	USB_BUS_LOCK_ASSERT(bus);
+
 	DPRINTFN(6, ("usb_block_freemem: size=%lu\n", (u_long)p->size));
-	USB_BUS_LOCK(bus);
 	LIST_INSERT_HEAD(&bus->blk_freelist, p, next);
 	bus->blk_nfree++;
-	USB_BUS_UNLOCK(bus);
 }
 
 usbd_status
