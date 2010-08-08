@@ -336,13 +336,13 @@ usbd_transfer(usbd_xfer_handle xfer)
 		return (xfer->done ? 0 : USBD_IN_PROGRESS);
 
 	/* Sync transfer, wait for completion. */
-	USB_PIPE_LOCK(pipe);	/* XXX need really? */
 	while (!xfer->done) {
 		if (pipe->device->bus->use_polling)
 			panic("usbd_transfer: not done");
+		USB_PIPE_LOCK(pipe);
 		msleep(xfer, &pipe->mtx, PRIBIO, "usbsyn", 0);
+		USB_PIPE_UNLOCK(pipe);
 	}
-	USB_PIPE_UNLOCK(pipe);
 	return (xfer->status);
 }
 
