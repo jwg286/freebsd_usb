@@ -168,6 +168,7 @@ static device_suspend_t ehci_pci_suspend;
 static device_resume_t ehci_pci_resume;
 static void ehci_pci_givecontroller(device_t self);
 static void ehci_pci_takecontroller(device_t self);
+static void ehci_busdma_lock_mutex(void *, bus_dma_lock_op_t);
 
 static int
 ehci_pci_suspend(device_t self)
@@ -473,7 +474,7 @@ ehci_pci_attach(device_t self)
 	err = bus_dma_tag_create(sc->sc_bus.parent_dmatag, 1, 0,
 	    BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR, NULL, NULL,
 	    BUS_SPACE_MAXSIZE_32BIT, USB_DMA_NSEG, BUS_SPACE_MAXSIZE_32BIT, 0,
-	    busdma_lock_mutex, &Giant, &sc->sc_bus.buffer_dmatag);
+	    ehci_busdma_lock_mutex, &sc->sc_bus.mtx, &sc->sc_bus.buffer_dmatag);
 	if (err) {
 		device_printf(self, "Could not allocate buffer DMA tag (%d)\n",
 		    err);
@@ -595,6 +596,25 @@ ehci_pci_givecontroller(device_t self)
 		pci_write_config(self, eecp + EHCI_LEGSUP_OS_SEM, 0, 1);
 	}
 #endif
+}
+
+static void
+ehci_busdma_lock_mutex(void *arg, bus_dma_lock_op_t op)
+{
+	struct mtx *dmtx;
+
+	TODO();
+	dmtx = (struct mtx *)arg;
+	switch (op) {
+	case BUS_DMA_LOCK:
+		mtx_lock(dmtx);
+		break;
+	case BUS_DMA_UNLOCK:
+		mtx_unlock(dmtx);
+		break;
+	default:
+		panic("Unknown operation 0x%x for busdma_lock_mutex!", op);
+	}
 }
 
 static device_method_t ehci_methods[] = {
