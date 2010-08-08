@@ -994,7 +994,9 @@ usbd_probe_and_attach(device_t parent, usbd_device_handle dev,
 			/* remove the last created child.  It is unused */
 			free(uaap, M_USB);
 			free(devinfo, M_USB);
+			mtx_lock(&Giant);
 			device_delete_child(parent, bdev);
+			mtx_unlock(&Giant);
 			/* free(uaap, M_USB); */ /* May be needed? xxx */
 			return (USBD_NORMAL_COMPLETION);
 		}
