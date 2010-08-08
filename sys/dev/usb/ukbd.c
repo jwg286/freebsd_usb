@@ -55,6 +55,8 @@ __FBSDID("$FreeBSD: stable/7/sys/dev/usb/ukbd.c 173566 2007-11-12 16:09:45Z kan 
 #include <sys/bus.h>
 #include <sys/file.h>
 #include <sys/limits.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
 #include <sys/selinfo.h>
 #include <sys/sysctl.h>
 #include <sys/uio.h>
@@ -110,7 +112,16 @@ struct ukbd_data {
 
 typedef struct ukbd_softc {
 	device_t		sc_dev;		/* base device */
+	struct mtx		sc_mtx;
 } ukbd_softc_t;
+
+#define	UKBD_LOCK_INIT(_sc) \
+	mtx_init(&(_sc)->sc_mtx, device_get_nameunit((_sc)->sc_dev), \
+	    NULL, MTX_DEF)
+#define	UKBD_LOCK_DESTROY(_sc)		mtx_destroy(&(_sc)->sc_mtx)
+#define	UKBD_LOCK(_sc)			mtx_lock(&(_sc)->sc_mtx)
+#define	UKBD_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
+#define	UKBD_LOCK_ASSERT(_sc)		mtx_assert(&(_sc)->sc_mtx, MA_OWNED)
 
 #define	UKBD_CHUNK	128	/* chunk size for read */
 #define	UKBD_BSIZE	1020	/* buffer size */
@@ -160,7 +171,7 @@ ukbd_match(device_t self)
 	if (sw == NULL)
 		return (UMATCH_NONE);
 
-	arg[0] = (void *)uaa;
+	arg[0] = (void *)self;
 	arg[1] = (void *)ukbd_intr;
 	if ((*sw->probe)(unit, (void *)arg, 0))
 		return (UMATCH_NONE);
@@ -185,13 +196,14 @@ ukbd_attach(device_t self)
 	int unit = device_get_unit(self);
 
 	sc->sc_dev = self;
+	UKBD_LOCK_INIT(sc);
 	sw = kbd_get_switch(DRIVER_NAME);
 	if (sw == NULL)
 		return ENXIO;
 
 	id = usbd_get_interface_descriptor(iface);
 
-	arg[0] = (void *)uaa;
+	arg[0] = (void *)self;
 	arg[1] = (void *)ukbd_intr;
 	kbd = NULL;
 	if ((*sw->probe)(unit, (void *)arg, 0))
@@ -339,6 +351,7 @@ static u_int8_t ukbd_trtab[256] = {
 };
 
 typedef struct ukbd_state {
+	struct ukbd_softc *ks_softc;
 	usbd_interface_handle ks_iface;	/* interface */
 	usbd_pipe_handle ks_intrpipe;	/* interrupt pipe */
 	struct usb_attach_arg *ks_uaa;
@@ -477,7 +490,7 @@ ukbd_configure(int flags)
 		return 0;
 
 	/* probe the default keyboard */
-	arg[0] = (void *)uaa;
+	arg[0] = (void *)self;
 	arg[1] = (void *)ukbd_intr;
 	kbd = NULL;
 	if (ukbd_probe(UKBD_DEFAULT, arg, flags))
@@ -497,10 +510,12 @@ static int
 ukbd_probe(int unit, void *arg, int flags)
 {
 	void **data;
+	device_t self;
 	struct usb_attach_arg *uaa;
 
 	data = (void **)arg;
-	uaa = (struct usb_attach_arg *)data[0];
+	self = (device_t)data[0];
+	uaa = device_get_ivars(self);
 
 	/* XXX */
 	if (unit == UKBD_DEFAULT) {
@@ -523,7 +538,9 @@ ukbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 	fkeytab_t *fkeymap;
 	int fkeymap_size;
 	void **data = (void **)arg;
-	struct usb_attach_arg *uaa = (struct usb_attach_arg *)data[0];
+	device_t self = (device_t)data[0];
+	struct ukbd_softc *sc = device_get_softc(self);
+	struct usb_attach_arg *uaa = device_get_ivars(self);
 
 	/* XXX */
 	if (unit == UKBD_DEFAULT) {
@@ -585,6 +602,7 @@ ukbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 		else
 			KBD_FOUND_DEVICE(kbd);
 		ukbd_clear_state(kbd);
+		state->ks_softc = sc;
 		state->ks_mode = K_XLATE;
 		state->ks_iface = uaa->iface;
 		state->ks_uaa = uaa;
