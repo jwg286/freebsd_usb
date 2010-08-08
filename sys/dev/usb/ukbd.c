@@ -1405,14 +1405,15 @@ ukbd_set_state(keyboard_t *kbd, void *buf, size_t len)
 static int
 ukbd_poll(keyboard_t *kbd, int on)
 {
+	struct ukbd_softc *sc;
 	ukbd_state_t *state;
 	usbd_device_handle dev;
-	int s;
 
 	state = (ukbd_state_t *)kbd->kb_data;
+	sc = state->ks_softc;
 	usbd_interface2device_handle(state->ks_iface, &dev);
 
-	s = splusb();
+	UKBD_LOCK(sc);
 	if (on) {
 		++state->ks_polling;
 		if (state->ks_polling == 1)
@@ -1422,7 +1423,7 @@ ukbd_poll(keyboard_t *kbd, int on)
 		if (state->ks_polling == 0)
 			usbd_set_polling(dev, on);
 	}
-	splx(s);
+	UKBD_UNLOCK(sc);
 	return 0;
 }
 
