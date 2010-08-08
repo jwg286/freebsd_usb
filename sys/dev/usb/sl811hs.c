@@ -1095,6 +1095,8 @@ void
 slhci_root_ctrl_done(usbd_xfer_handle xfer)
 {
 	DPRINTF(D_TRACE, ("SLRCdone\n"));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 static usbd_status
@@ -1151,6 +1153,8 @@ static void
 slhci_root_intr_done(usbd_xfer_handle xfer)
 {
 	//DPRINTF(D_XFER, ("RIdn "));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 static usbd_status
@@ -1254,6 +1258,8 @@ static void
 slhci_device_ctrl_done(usbd_xfer_handle xfer)
 {
 	DPRINTF(D_TRACE, ("Cdn "));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 static usbd_status
@@ -1366,6 +1372,8 @@ static void
 slhci_device_intr_done(usbd_xfer_handle xfer)
 {
 	DPRINTF(D_TRACE, ("INTRdone "));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 static usbd_status
@@ -1398,6 +1406,8 @@ static void
 slhci_device_isoc_done(usbd_xfer_handle xfer)
 {
 	DPRINTF(D_TRACE, ("Sdn "));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 static usbd_status
@@ -1430,6 +1440,8 @@ static void
 slhci_device_bulk_done(usbd_xfer_handle xfer)
 {
 	DPRINTF(D_TRACE, ("Bdn "));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 #define DATA0_RD	(0x03)

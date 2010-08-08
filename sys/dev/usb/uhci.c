@@ -954,11 +954,15 @@ uhci_poll_hub(void *addr)
 void
 uhci_root_intr_done(usbd_xfer_handle xfer)
 {
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 void
 uhci_root_ctrl_done(usbd_xfer_handle xfer)
 {
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 /*
@@ -2839,6 +2843,8 @@ uhci_device_isoc_done(usbd_xfer_handle xfer)
 
 	DPRINTFN(4, ("uhci_isoc_done: length=%d\n", xfer->actlen));
 
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 	if (ii->xfer != xfer)
 		/* Not on interrupt list, ignore it. */
 		return;
@@ -2890,6 +2896,8 @@ uhci_device_intr_done(usbd_xfer_handle xfer)
 	int i, npoll;
 
 	DPRINTFN(5, ("uhci_device_intr_done: length=%d\n", xfer->actlen));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	npoll = upipe->u.intr.npoll;
 	for(i = 0; i < npoll; i++) {
@@ -2952,6 +2960,8 @@ uhci_device_ctrl_done(usbd_xfer_handle xfer)
 	uhci_softc_t *sc = ii->sc;
 	struct uhci_pipe *upipe = (struct uhci_pipe *)xfer->pipe;
 
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 #ifdef DIAGNOSTIC
 	if (!(xfer->rqflags & URQ_REQUEST))
 		panic("uhci_device_ctrl_done: not a request");
@@ -2988,6 +2998,8 @@ uhci_device_bulk_done(usbd_xfer_handle xfer)
 
 	DPRINTFN(5,("uhci_device_bulk_done: xfer=%p ii=%p sc=%p upipe=%p\n",
 		    xfer, ii, sc, upipe));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	if (!uhci_active_intr_info(ii))
 		return;

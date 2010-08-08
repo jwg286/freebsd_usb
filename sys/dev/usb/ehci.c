@@ -2150,6 +2150,8 @@ ehci_root_ctrl_close(usbd_pipe_handle pipe)
 void
 ehci_root_intr_done(usbd_xfer_handle xfer)
 {
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 static usbd_status
@@ -2209,6 +2211,8 @@ ehci_root_intr_close(usbd_pipe_handle pipe)
 void
 ehci_root_ctrl_done(usbd_xfer_handle xfer)
 {
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 /************************/
@@ -2828,6 +2832,8 @@ ehci_device_ctrl_done(usbd_xfer_handle xfer)
 
 	DPRINTFN(10,("ehci_ctrl_done: xfer=%p\n", xfer));
 
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 #ifdef DIAGNOSTIC
 	if (!(xfer->rqflags & URQ_REQUEST)) {
 		panic("ehci_ctrl_done: not a request");
@@ -3160,6 +3166,8 @@ ehci_device_bulk_done(usbd_xfer_handle xfer)
 	DPRINTFN(10,("ehci_bulk_done: xfer=%p, actlen=%d\n",
 		     xfer, xfer->actlen));
 
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 	if (xfer->status != USBD_NOMEM && ehci_active_intr_list(ex)) {
 		ehci_del_intr_list(ex);	/* remove from active list */
 		ehci_free_sqtd_chain(sc, epipe->sqh, ex->sqtdstart,
@@ -3348,6 +3356,8 @@ ehci_device_intr_done(usbd_xfer_handle xfer)
 
 	DPRINTFN(10, ("ehci_device_intr_done: xfer=%p, actlen=%d\n",
 	    xfer, xfer->actlen));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	sqh = epipe->sqh;
 	if (xfer->pipe->repeat) {

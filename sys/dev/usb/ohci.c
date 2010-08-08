@@ -1527,6 +1527,8 @@ ohci_device_ctrl_done(usbd_xfer_handle xfer)
 {
 	DPRINTFN(10,("ohci_device_ctrl_done: xfer=%p\n", xfer));
 
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 #ifdef DIAGNOSTIC
 	if (!(xfer->rqflags & URQ_REQUEST)) {
 		panic("ohci_device_ctrl_done: not a request");
@@ -1545,6 +1547,8 @@ ohci_device_intr_done(usbd_xfer_handle xfer)
 	DPRINTFN(10,("ohci_device_intr_done: xfer=%p, actlen=%d\n",
 		     xfer, xfer->actlen));
 
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 	xfer->hcpriv = NULL;
 	if (xfer->pipe->repeat) {
 		err = ohci_device_intr_insert(sc, xfer);
@@ -1560,6 +1564,8 @@ ohci_device_bulk_done(usbd_xfer_handle xfer)
 {
 	DPRINTFN(10,("ohci_device_bulk_done: xfer=%p, actlen=%d\n",
 		     xfer, xfer->actlen));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	xfer->hcpriv = NULL;
 }
@@ -1620,12 +1626,18 @@ ohci_rhsc(ohci_softc_t *sc, usbd_xfer_handle xfer)
 void
 ohci_root_intr_done(usbd_xfer_handle xfer)
 {
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 	xfer->hcpriv = NULL;
 }
 
 void
 ohci_root_ctrl_done(usbd_xfer_handle xfer)
 {
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 	xfer->hcpriv = NULL;
 }
 
@@ -3599,6 +3611,8 @@ ohci_device_isoc_done(usbd_xfer_handle xfer)
 	 * UGEN_NISOREQS xfers outstanding on an open would work). Perhaps
 	 * this could all be re-factored, but that's another pass...
 	 */
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 usbd_status
