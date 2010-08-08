@@ -14,4 +14,6 @@ opt_kbd.h:
 	echo "#define KBD_INSTALL_CDEV 1" > ${.TARGET}
 .endif
 
+DEBUG_FLAGS=	-g -O0 -DINVARIANTS
+
 .include <bsd.kmod.mk>
