@@ -73,6 +73,7 @@ __FBSDID("$FreeBSD: stable/7/sys/dev/usb/ehci.c 180910 2008-07-28 16:19:16Z thom
 #if defined(DIAGNOSTIC) && defined(__i386__) && defined(__FreeBSD__)
 #include <machine/cpu.h>
 #endif
+#include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/sysctl.h>
@@ -698,7 +699,9 @@ ehci_pcd(ehci_softc_t *sc, usbd_xfer_handle xfer)
 	xfer->status = USBD_NORMAL_COMPLETION;
 
 	hacksync(xfer);	/* XXX to compensate for usb_transfer_complete */
+	USB_PIPE_LOCK(pipe);
 	usb_transfer_complete(xfer);
+	USB_PIPE_UNLOCK(pipe);
 }
 
 void
@@ -1714,7 +1717,7 @@ ehci_root_ctrl_start(usbd_xfer_handle xfer)
 	usb_device_request_t *req;
 	void *buf = NULL;
 	int port, i;
-	int s, len, value, index, l, totlen = 0;
+	int len, value, index, l, totlen = 0;
 	usb_port_status_t ps;
 	usb_hub_descriptor_t hubd;
 	usbd_status err;
@@ -2090,10 +2093,10 @@ ehci_root_ctrl_start(usbd_xfer_handle xfer)
 	err = USBD_NORMAL_COMPLETION;
  ret:
 	xfer->status = err;
-	s = splusb();
+	USB_PIPE_LOCK(xfer->pipe);
 	hacksync(xfer);	/* XXX to compensate for usb_transfer_complete */
 	usb_transfer_complete(xfer);
-	splx(s);
+	USB_PIPE_UNLOCK(xfer->pipe);
 	return (USBD_IN_PROGRESS);
 }
 

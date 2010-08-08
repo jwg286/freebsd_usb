@@ -923,7 +923,6 @@ uhci_poll_hub(void *addr)
 	usbd_pipe_handle pipe = xfer->pipe;
 	usbd_device_handle dev = pipe->device;
 	uhci_softc_t *sc = (uhci_softc_t *)dev->bus;
-	int s;
 	u_char *p;
 
 	DPRINTFN(20, ("uhci_poll_hub\n"));
@@ -942,11 +941,11 @@ uhci_poll_hub(void *addr)
 
 	xfer->actlen = 1;
 	xfer->status = USBD_NORMAL_COMPLETION;
-	s = splusb();
 	dev->bus->intr_context++;
+	USB_PIPE_LOCK(pipe);
 	uhci_transfer_complete(xfer);
+	USB_PIPE_UNLOCK(pipe);
 	dev->bus->intr_context--;
-	splx(s);
 }
 
 void
@@ -1278,7 +1277,6 @@ uhci_softintr(void *v)
 	DPRINTFN(10,("%s: uhci_softintr (%d)\n", device_get_nameunit(sc->sc_bus.bdev),
 		     sc->sc_bus.intr_context));
 
-	UHCI_LOCK(sc);
 	sc->sc_bus.intr_context++;
 
 	/*
@@ -1292,8 +1290,13 @@ uhci_softintr(void *v)
 	 * We scan all interrupt descriptors to see if any have
 	 * completed.
 	 */
-	LIST_FOREACH_SAFE(ii, &sc->sc_intrhead, list, nextii)
+	UHCI_LOCK(sc);
+	LIST_FOREACH_SAFE(ii, &sc->sc_intrhead, list, nextii) {
+		UHCI_UNLOCK(sc);
 		uhci_check_intr(sc, ii);
+		UHCI_LOCK(sc);
+	}
+	UHCI_UNLOCK(sc);
 
 #ifdef USB_USE_SOFTINTR
 	if (sc->sc_softwake) {
@@ -1303,7 +1306,6 @@ uhci_softintr(void *v)
 #endif /* USB_USE_SOFTINTR */
 
 	sc->sc_bus.intr_context--;
-	UHCI_UNLOCK(sc);
 }
 
 /* Check for an interrupt. */
@@ -1367,7 +1369,6 @@ uhci_check_intr(uhci_softc_t *sc, uhci_intr_info_t *ii)
 	uhci_idone(ii);
 }
 
-/* Called at splusb() */
 void
 uhci_idone(uhci_intr_info_t *ii)
 {
@@ -1378,21 +1379,22 @@ uhci_idone(uhci_intr_info_t *ii)
 	int actlen;
 
 	DPRINTFN(12, ("uhci_idone: ii=%p\n", ii));
+
+	USB_PIPE_LOCK(xfer->pipe);
+
 #ifdef DIAGNOSTIC
 	{
-		int s = splhigh();
 		if (ii->isdone) {
-			splx(s);
 #ifdef USB_DEBUG
 			printf("uhci_idone: ii is done!\n   ");
 			uhci_dump_ii(ii);
 #else
 			printf("uhci_idone: ii=%p is done!\n", ii);
 #endif
+			USB_PIPE_UNLOCK(xfer->pipe);
 			return;
 		}
 		ii->isdone = 1;
-		splx(s);
 	}
 #endif
 
@@ -1490,6 +1492,7 @@ uhci_idone(uhci_intr_info_t *ii)
 
  end:
 	uhci_transfer_complete(xfer);
+	USB_PIPE_UNLOCK(xfer->pipe);
 	DPRINTFN(12, ("uhci_idone: ii=%p done\n", ii));
 }
 
@@ -2123,6 +2126,8 @@ uhci_transfer_complete(usbd_xfer_handle xfer)
 	struct uhci_pipe *upipe = (struct uhci_pipe *)xfer->pipe;
 	uhci_soft_td_t *p;
 	int i, isread, n;
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	/* XXX, must be an easier way to detect reads... */
 	isread = ((xfer->rqflags & URQ_REQUEST) &&
@@ -3349,7 +3354,7 @@ uhci_root_ctrl_start(usbd_xfer_handle xfer)
 	usb_device_request_t *req;
 	void *buf = NULL;
 	int port, x;
-	int s, len, value, index, status, change, l, totlen = 0;
+	int len, value, index, status, change, l, totlen = 0;
 	usb_port_status_t ps;
 	usbd_status err;
 
@@ -3661,9 +3666,9 @@ uhci_root_ctrl_start(usbd_xfer_handle xfer)
 	err = USBD_NORMAL_COMPLETION;
  ret:
 	xfer->status = err;
-	s = splusb();
+	USB_PIPE_LOCK(xfer->pipe);
 	uhci_transfer_complete(xfer);
-	splx(s);
+	USB_PIPE_UNLOCK(xfer->pipe);
 	return (USBD_IN_PROGRESS);
 }
 

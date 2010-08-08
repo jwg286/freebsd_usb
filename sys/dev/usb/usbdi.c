@@ -152,6 +152,8 @@ usbd_dump_queue(usbd_pipe_handle pipe)
 {
 	usbd_xfer_handle xfer;
 
+	USB_PIPE_LOCK_ASSERT(pipe);
+
 	printf("usbd_dump_queue: pipe=%p\n", pipe);
 	STAILQ_FOREACH(xfer, &pipe->queue, next) {
 		printf("  xfer=%p\n", xfer);
@@ -264,6 +266,9 @@ usbd_close_pipe(usbd_pipe_handle pipe)
 	}
 #endif
 
+	/* assumes that this API is called from attach/detach with Giant */
+	mtx_assert(&Giant, MA_OWNED);
+
 	if (--pipe->refcnt != 0)
 		return (USBD_NORMAL_COMPLETION);
 	if (! STAILQ_EMPTY(&pipe->queue))
@@ -285,13 +290,15 @@ usbd_transfer(usbd_xfer_handle xfer)
 	struct usb_dma_mapping *dmap = &xfer->dmamap;
 	usbd_status err;
 	u_int size;
-	int s;
 
 	DPRINTFN(5,("usbd_transfer: xfer=%p, flags=%d, pipe=%p, running=%d\n",
 		    xfer, xfer->flags, pipe, pipe->running));
 #ifdef USB_DEBUG
-	if (usbdebug > 5)
+	if (usbdebug > 5) {
+		USB_PIPE_LOCK(pipe);
 		usbd_dump_queue(pipe);
+		USB_PIPE_UNLOCK(pipe);
+	}
 #endif
 	xfer->done = 0;
 
@@ -329,13 +336,13 @@ usbd_transfer(usbd_xfer_handle xfer)
 		return (xfer->done ? 0 : USBD_IN_PROGRESS);
 
 	/* Sync transfer, wait for completion. */
-	s = splusb();
+	USB_PIPE_LOCK(pipe);	/* XXX need really? */
 	while (!xfer->done) {
 		if (pipe->device->bus->use_polling)
 			panic("usbd_transfer: not done");
-		tsleep(xfer, PRIBIO, "usbsyn", 0);
+		msleep(xfer, &pipe->mtx, PRIBIO, "usbsyn", 0);
 	}
-	splx(s);
+	USB_PIPE_UNLOCK(pipe);
 	return (xfer->status);
 }
 
@@ -666,7 +673,6 @@ usbd_status
 usbd_abort_pipe(usbd_pipe_handle pipe)
 {
 	usbd_status err;
-	int s;
 
 #ifdef DIAGNOSTIC
 	if (pipe == NULL) {
@@ -674,9 +680,9 @@ usbd_abort_pipe(usbd_pipe_handle pipe)
 		return (USBD_NORMAL_COMPLETION);
 	}
 #endif
-	s = splusb();
+	USB_PIPE_LOCK(pipe);
 	err = usbd_ar_pipe(pipe);
-	splx(s);
+	USB_PIPE_UNLOCK(pipe);
 	return (err);
 }
 
@@ -868,7 +874,7 @@ usbd_ar_pipe(usbd_pipe_handle pipe)
 {
 	usbd_xfer_handle xfer;
 
-	SPLUSBCHECK;
+	USB_PIPE_LOCK_ASSERT(pipe);
 
 	DPRINTFN(2,("usbd_ar_pipe: pipe=%p\n", pipe));
 #ifdef USB_DEBUG
@@ -889,7 +895,6 @@ usbd_ar_pipe(usbd_pipe_handle pipe)
 	return (USBD_NORMAL_COMPLETION);
 }
 
-/* Called at splusb() */
 void
 usb_transfer_complete(usbd_xfer_handle xfer)
 {
@@ -902,7 +907,7 @@ usb_transfer_complete(usbd_xfer_handle xfer)
 	int repeat = pipe->repeat;
 	int polling;
 
-	SPLUSBCHECK;
+	USB_PIPE_LOCK_ASSERT(pipe);
 
 	DPRINTFN(5, ("usb_transfer_complete: pipe=%p xfer=%p status=%d "
 		     "actlen=%d\n", pipe, xfer, xfer->status, xfer->actlen));
@@ -999,7 +1004,6 @@ usb_insert_transfer(usbd_xfer_handle xfer)
 {
 	usbd_pipe_handle pipe = xfer->pipe;
 	usbd_status err;
-	int s;
 
 	DPRINTFN(5,("usb_insert_transfer: pipe=%p running=%d timeout=%d\n",
 		    pipe, pipe->running, xfer->timeout));
@@ -1011,7 +1015,7 @@ usb_insert_transfer(usbd_xfer_handle xfer)
 	}
 	xfer->busy_free = XFER_ONQU;
 #endif
-	s = splusb();
+	USB_PIPE_LOCK(pipe);
 	KASSERT(STAILQ_FIRST(&pipe->queue) != xfer, ("usb_insert_transfer"));
 	STAILQ_INSERT_TAIL(&pipe->queue, xfer, next);
 	if (pipe->running)
@@ -1020,18 +1024,17 @@ usb_insert_transfer(usbd_xfer_handle xfer)
 		pipe->running = 1;
 		err = USBD_NORMAL_COMPLETION;
 	}
-	splx(s);
+	USB_PIPE_UNLOCK(pipe);
 	return (err);
 }
 
-/* Called at splusb() */
 void
 usbd_start_next(usbd_pipe_handle pipe)
 {
 	usbd_xfer_handle xfer;
 	usbd_status err;
 
-	SPLUSBCHECK;
+	USB_PIPE_LOCK_ASSERT(pipe);
 
 #ifdef DIAGNOSTIC
 	if (pipe == NULL) {
