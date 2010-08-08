@@ -716,17 +716,13 @@ ukbd_term(keyboard_t *kbd)
 static void
 ukbd_timeout(void *arg)
 {
-	struct ukbd_softc *sc;
 	keyboard_t *kbd;
 	ukbd_state_t *state;
 
 	kbd = (keyboard_t *)arg;
 	state = (ukbd_state_t *)kbd->kb_data;
-	sc = state->ks_softc;
-	UKBD_LOCK(sc);
 	(*kbdsw[kbd->kb_index]->intr)(kbd, (void *)USBD_NORMAL_COMPLETION);
 	callout_reset(&state->ks_timeout_handle, hz / 40, ukbd_timeout, arg);
-	UKBD_UNLOCK(sc);
 }
 
 static int
@@ -735,6 +731,7 @@ ukbd_interrupt(keyboard_t *kbd, void *arg)
 	usbd_status status = (usbd_status)arg;
 	ukbd_state_t *state;
 	struct ukbd_data *ud;
+	struct ukbd_softc *sc;
 	struct timeval tv;
 	u_long now;
 	int mod, omod;
@@ -746,6 +743,7 @@ ukbd_interrupt(keyboard_t *kbd, void *arg)
 		return 0;
 
 	state = (ukbd_state_t *)kbd->kb_data;
+	sc = state->ks_softc;
 	ud = &state->ks_ndata;
 
 	if (status != USBD_NORMAL_COMPLETION) {
@@ -755,8 +753,12 @@ ukbd_interrupt(keyboard_t *kbd, void *arg)
 		return 0;
 	}
 
-	if (ud->keycode[0] == KEY_ERROR)
+	UKBD_LOCK(sc);
+
+	if (ud->keycode[0] == KEY_ERROR) {
+		UKBD_UNLOCK(sc);
 		return 0;		/* ignore  */
+	}
 
 	getmicrouptime(&tv);
 	now = (u_long)tv.tv_sec*1000 + (u_long)tv.tv_usec/1000;
@@ -828,8 +830,10 @@ ukbd_interrupt(keyboard_t *kbd, void *arg)
 
 	state->ks_odata = *ud;
 	bcopy(state->ks_ntime, state->ks_otime, sizeof(state->ks_ntime));
-	if (state->ks_inputs <= 0)
+	if (state->ks_inputs <= 0) {
+		UKBD_UNLOCK(sc);
 		return 0;
+	}
 
 #ifdef USB_DEBUG
 	for (i = state->ks_inputhead, j = 0; j < state->ks_inputs; ++j,
@@ -846,6 +850,8 @@ ukbd_interrupt(keyboard_t *kbd, void *arg)
 	}
 	DPRINTF(("\n"));
 #endif /* USB_DEBUG */
+
+	UKBD_UNLOCK(sc);
 
 	if (state->ks_polling)
 		return 0;
@@ -1415,17 +1421,25 @@ ukbd_poll(keyboard_t *kbd, int on)
 	sc = state->ks_softc;
 	usbd_interface2device_handle(state->ks_iface, &dev);
 
-	UKBD_LOCK(sc);
 	if (on) {
+		UKBD_LOCK(sc);
 		++state->ks_polling;
-		if (state->ks_polling == 1)
+		if (state->ks_polling == 1) {
+			UKBD_UNLOCK(sc);
 			usbd_set_polling(dev, on);
+			UKBD_LOCK(sc);
+		}
+		UKBD_UNLOCK(sc);
 	} else {
+		UKBD_LOCK(sc);
 		--state->ks_polling;
-		if (state->ks_polling == 0)
+		if (state->ks_polling == 0) {
+			UKBD_UNLOCK(sc);
 			usbd_set_polling(dev, on);
+			UKBD_LOCK(sc);
+		}
+		UKBD_UNLOCK(sc);
 	}
-	UKBD_UNLOCK(sc);
 	return 0;
 }
 
