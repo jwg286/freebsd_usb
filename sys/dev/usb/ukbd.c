@@ -716,16 +716,17 @@ ukbd_term(keyboard_t *kbd)
 static void
 ukbd_timeout(void *arg)
 {
+	struct ukbd_softc *sc;
 	keyboard_t *kbd;
 	ukbd_state_t *state;
-	int s;
 
 	kbd = (keyboard_t *)arg;
 	state = (ukbd_state_t *)kbd->kb_data;
-	s = splusb();
+	sc = state->ks_softc;
+	UKBD_LOCK(sc);
 	(*kbdsw[kbd->kb_index]->intr)(kbd, (void *)USBD_NORMAL_COMPLETION);
 	callout_reset(&state->ks_timeout_handle, hz / 40, ukbd_timeout, arg);
-	splx(s);
+	UKBD_UNLOCK(sc);
 }
 
 static int
@@ -866,20 +867,20 @@ ukbd_interrupt(keyboard_t *kbd, void *arg)
 static int
 ukbd_getc(ukbd_state_t *state, int wait)
 {
+	struct ukbd_softc *sc = state->ks_softc;
 	int c;
-	int s;
 
 	if (state->ks_polling) {
 		DPRINTFN(1,("ukbd_getc: polling\n"));
-		s = splusb();
+		UKBD_LOCK(sc);
 		while (state->ks_inputs <= 0) {
 			usbd_dopoll(state->ks_iface);
 			if (wait == FALSE)
 				break;
 		}
-		splx(s);
+		UKBD_UNLOCK(sc);
 	}
-	s = splusb();
+	UKBD_LOCK(sc);
 	if (state->ks_inputs <= 0) {
 		c = -1;
 	} else {
@@ -887,7 +888,7 @@ ukbd_getc(ukbd_state_t *state, int wait)
 		--state->ks_inputs;
 		state->ks_inputhead = (state->ks_inputhead + 1)%INPUTBUFSIZE;
 	}
-	splx(s);
+	UKBD_UNLOCK(sc);
 	return c;
 }
 
@@ -905,11 +906,12 @@ ukbd_test_if(keyboard_t *kbd)
 static int
 ukbd_enable(keyboard_t *kbd)
 {
-	int s;
+	ukbd_state_t *state = kbd->kb_data;
+	struct ukbd_softc *sc = state->ks_softc;
 
-	s = splusb();
+	UKBD_LOCK(sc);
 	KBD_ACTIVATE(kbd);
-	splx(s);
+	UKBD_UNLOCK(sc);
 	return 0;
 }
 
@@ -1209,14 +1211,14 @@ ukbd_ioctl(keyboard_t *kbd, u_long cmd, caddr_t arg)
 		0, 2, 1, 3, 4, 6, 5, 7,
 	};
 	ukbd_state_t *state = kbd->kb_data;
-	int s;
+	struct ukbd_softc *sc = state->ks_softc;
 	int i;
 #if defined(COMPAT_FREEBSD6) || defined(COMPAT_FREEBSD5) || \
     defined(COMPAT_FREEBSD4) || defined(COMPAT_43)
 	int ival;
 #endif
 
-	s = splusb();
+	UKBD_LOCK(sc);
 	switch (cmd) {
 
 	case KDGKBMODE:		/* get keyboard mode */
@@ -1246,7 +1248,7 @@ ukbd_ioctl(keyboard_t *kbd, u_long cmd, caddr_t arg)
 			}
 			break;
 		default:
-			splx(s);
+			UKBD_UNLOCK(sc);
 			return EINVAL;
 		}
 		break;
@@ -1264,7 +1266,7 @@ ukbd_ioctl(keyboard_t *kbd, u_long cmd, caddr_t arg)
 	case KDSETLED:		/* set keyboard LED */
 		/* NOTE: lock key state in ks_state won't be changed */
 		if (*(int *)arg & ~LOCK_MASK) {
-			splx(s);
+			UKBD_UNLOCK(sc);
 			return EINVAL;
 		}
 		i = *(int *)arg;
@@ -1295,17 +1297,17 @@ ukbd_ioctl(keyboard_t *kbd, u_long cmd, caddr_t arg)
 #endif
 	case KDSKBSTATE:	/* set lock key state */
 		if (*(int *)arg & ~LOCK_MASK) {
-			splx(s);
+			UKBD_UNLOCK(sc);
 			return EINVAL;
 		}
 		state->ks_state &= ~LOCK_MASK;
 		state->ks_state |= *(int *)arg;
-		splx(s);
+		UKBD_UNLOCK(sc);
 		/* set LEDs and quit */
 		return ukbd_ioctl(kbd, KDSETLED, arg);
 
 	case KDSETREPEAT:	/* set keyboard repeat rate (new interface) */
-		splx(s);
+		UKBD_UNLOCK(sc);
 		if (!KBD_HAS_DEVICE(kbd))
 			return 0;
 		if (((int *)arg)[1] < 0)
@@ -1327,7 +1329,7 @@ ukbd_ioctl(keyboard_t *kbd, u_long cmd, caddr_t arg)
 		/* FALLTHROUGH */
 #endif
 	case KDSETRAD:		/* set keyboard repeat rate (old interface) */
-		splx(s);
+		UKBD_UNLOCK(sc);
 		return set_typematic(kbd, *(int *)arg);
 
 	case PIO_KEYMAP:	/* set keyboard translation table */
@@ -1336,7 +1338,7 @@ ukbd_ioctl(keyboard_t *kbd, u_long cmd, caddr_t arg)
 		state->ks_accents = 0;
 		/* FALLTHROUGH */
 	default:
-		splx(s);
+		UKBD_UNLOCK(sc);
 		return genkbd_commonioctl(kbd, cmd, arg);
 
 #ifdef USB_DEBUG
@@ -1346,7 +1348,7 @@ ukbd_ioctl(keyboard_t *kbd, u_long cmd, caddr_t arg)
 #endif
 	}
 
-	splx(s);
+	UKBD_UNLOCK(sc);
 	return 0;
 }
 
