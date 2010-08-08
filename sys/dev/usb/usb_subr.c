@@ -1019,8 +1019,12 @@ usbd_probe_and_attach(device_t parent, usbd_device_handle dev,
 	usbd_devinfo(dev, 1, devinfo);
 	device_set_desc_copy(bdev, devinfo);
 	free(devinfo, M_USB);
-	if (device_probe_and_attach(bdev) == 0)
+	mtx_lock(&Giant);
+	if (device_probe_and_attach(bdev) == 0) {
+		mtx_unlock(&Giant);
 		return (USBD_NORMAL_COMPLETION);
+	}
+	mtx_unlock(&Giant);
 
 	/*
 	 * The generic attach failed, but leave the device as it is.
