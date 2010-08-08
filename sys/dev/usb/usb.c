@@ -401,34 +401,32 @@ void
 usb_add_task(usbd_device_handle dev, struct usb_task *task, int queue)
 {
 	struct usb_taskq *taskq;
-	int s;
 
-	s = splusb();
 	taskq = &usb_taskq[queue];
 	if (task->queue == -1) {
 		DPRINTFN(2,("usb_add_task: task=%p\n", task));
+		USB_TASKQ_LOCK(taskq);
 		TAILQ_INSERT_TAIL(&taskq->tasks, task, next);
+		USB_TASKQ_UNLOCK(taskq);
 		task->queue = queue;
 	} else {
 		DPRINTFN(3,("usb_add_task: task=%p on q\n", task));
 	}
 	wakeup(&taskq->tasks);
-	splx(s);
 }
 
 void
 usb_rem_task(usbd_device_handle dev, struct usb_task *task)
 {
 	struct usb_taskq *taskq;
-	int s;
 
-	s = splusb();
 	if (task->queue != -1) {
 		taskq = &usb_taskq[task->queue];
+		USB_TASKQ_LOCK(taskq);
 		TAILQ_REMOVE(&taskq->tasks, task, next);
+		USB_TASKQ_UNLOCK(taskq);
 		task->queue = -1;
 	}
-	splx(s);
 }
 
 void
