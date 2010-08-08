@@ -2375,7 +2375,6 @@ uhci_device_request(usbd_xfer_handle xfer)
 	u_int32_t ls;
 	usbd_status err;
 	int isread;
-	int s;
 
 	DPRINTFN(3,("uhci_device_control type=0x%02x, request=0x%02x, "
 		    "wValue=0x%04x, wIndex=0x%04x len=%d, addr=%d, endpt=%d\n",
@@ -2445,7 +2444,7 @@ uhci_device_request(usbd_xfer_handle xfer)
 	sqh->elink = setup;
 	sqh->qh.qh_elink = htole32(setup->physaddr | UHCI_PTR_TD);
 
-	s = splusb();
+	UHCI_LOCK(sc);
 	if (dev->speed == USB_SPEED_LOW)
 		uhci_add_ls_ctrl(sc, sqh);
 	else
@@ -2483,7 +2482,7 @@ uhci_device_request(usbd_xfer_handle xfer)
 			    uhci_timeout, ii);
 	}
 	xfer->status = USBD_IN_PROGRESS;
-	splx(s);
+	UHCI_UNLOCK(sc);
 
 	return (USBD_NORMAL_COMPLETION);
 }
