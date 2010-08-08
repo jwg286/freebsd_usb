@@ -164,7 +164,8 @@ static void	usb_create_event_thread(void *);
 static void	usb_event_thread(void *);
 static void	usb_task_thread(void *);
 
-struct mtx usbevent_mtx;
+struct mtx usbevent_mtx;		/* USB events */
+struct mtx usbthr_mtx;			/* USB event thread (usb discover) */
 static int usb_inited;
 static struct cdev *usb_dev;		/* The /dev/usb device. */
 static int usb_ndevs;			/* Number of /dev/usbN devices. */
@@ -230,16 +231,19 @@ usb_modevent(module_t mode, int type, void *data)
 
 	switch (type) {
 	case MOD_LOAD:
-		if (atomic_cmpset_int(&usb_inited, 0, 1))
+		if (atomic_cmpset_int(&usb_inited, 0, 1)) {
 			mtx_init(&usbevent_mtx, "USB common lock", NULL,
 			    MTX_DEF);
-		else
+			mtx_init(&usbthr_mtx, "USB thread lock", NULL,
+			    MTX_DEF);
+		} else
 			atomic_add_int(&usb_inited, 1);
 		break;
 	case MOD_UNLOAD:
-		if (atomic_cmpset_int(&usb_inited, 1, 0))
+		if (atomic_cmpset_int(&usb_inited, 1, 0)) {
 			mtx_destroy(&usbevent_mtx);
-		else
+			mtx_destroy(&usbthr_mtx);
+		} else
 			atomic_add_int(&usb_inited, -1);
 		break;
 	default:
@@ -434,8 +438,7 @@ usb_event_thread(void *arg)
 {
 	static int newthread_wchan;
 	struct usb_softc *sc = arg;
-
-	mtx_lock(&Giant);
+	int err;
 
 	DPRINTF(("usb_event_thread: start\n"));
 
@@ -453,7 +456,11 @@ usb_event_thread(void *arg)
 	 */
 	wakeup(&newthread_wchan);
 	for (;;) {
-		if (tsleep(&newthread_wchan , PWAIT, "usbets", hz * 4) != 0)
+		mtx_lock(&usbthr_mtx);
+		err = msleep(&newthread_wchan, &usbthr_mtx, PWAIT,
+		    "usbets", hz * 4);
+		mtx_unlock(&usbthr_mtx);
+		if (err != 0)
 			break;
 	}
 
@@ -475,21 +482,21 @@ usb_event_thread(void *arg)
 		if (usb_noexplore < 2)
 #endif
 		usb_discover(sc);
+		mtx_lock(&usbthr_mtx);
 #ifdef USB_DEBUG
-		(void)tsleep(&sc->sc_bus->needs_explore, PWAIT, "usbevt",
-		    usb_noexplore ? 0 : hz * 60);
+		(void)msleep(&sc->sc_bus->needs_explore, &usbthr_mtx,
+		    PWAIT, "usbevt", usb_noexplore ? 0 : hz * 60);
 #else
-		(void)tsleep(&sc->sc_bus->needs_explore, PWAIT, "usbevt",
-		    hz * 60);
+		(void)msleep(&sc->sc_bus->needs_explore, &usbthr_mtx,
+		    PWAIT, "usbevt", hz * 60);
 #endif
+		mtx_unlock(&usbthr_mtx);
 		DPRINTFN(2,("usb_event_thread: woke up\n"));
 	}
 	sc->sc_event_thread = NULL;
 
 	/* In case parent is waiting for us to exit. */
 	wakeup(sc);
-
-	mtx_unlock(&Giant);
 
 	DPRINTF(("usb_event_thread: exit\n"));
 	kproc_exit(0);
