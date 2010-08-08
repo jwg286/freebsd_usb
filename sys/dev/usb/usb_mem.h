@@ -56,3 +56,4 @@ typedef struct usb_dma_block {
 
 usbd_status	usb_allocmem(usbd_bus_handle,size_t,size_t, usb_dma_t *);
 void		usb_freemem(usbd_bus_handle, usb_dma_t *);
+void		usb_freemem_locked(usbd_bus_handle, usb_dma_t *);

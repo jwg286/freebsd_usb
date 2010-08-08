@@ -273,7 +273,7 @@ usb_allocmem(usbd_bus_handle bus, size_t size, size_t align, usb_dma_t *p)
 }
 
 void
-usb_freemem(usbd_bus_handle bus, usb_dma_t *p)
+usb_freemem_locked(usbd_bus_handle bus, usb_dma_t *p)
 {
 	struct usb_frag_dma *f;
 
@@ -289,4 +289,13 @@ usb_freemem(usbd_bus_handle bus, usb_dma_t *p)
 	f->offs = p->offs;
 	LIST_INSERT_HEAD(&bus->frag_freelist, f, next);
 	DPRINTFN(5, ("usb_freemem: frag=%p\n", f));
+}
+
+void
+usb_freemem(usbd_bus_handle bus, usb_dma_t *p)
+{
+
+	USB_BUS_LOCK(bus);
+	usb_freemem_locked(bus, p);
+	USB_BUS_UNLOCK(bus);
 }

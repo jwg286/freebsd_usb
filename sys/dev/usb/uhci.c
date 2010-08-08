@@ -559,9 +559,7 @@ uhci_detach(struct uhci_softc *sc, int flags)
 	}
 
 	/* XXX free other data structures XXX */
-	UHCI_LOCK(sc);
 	usb_freemem(&sc->sc_bus, &sc->sc_dma);
-	UHCI_UNLOCK(sc);
 
 	return (rv);
 }
@@ -576,9 +574,7 @@ void
 uhci_freem(struct usbd_bus *bus, usb_dma_t *dma)
 {
 
-	USB_BUS_LOCK(bus);
 	usb_freemem(bus, dma);
-	USB_BUS_UNLOCK(bus);
 }
 
 usbd_xfer_handle
@@ -1686,7 +1682,7 @@ uhci_free_std(uhci_softc_t *sc, uhci_soft_td_t *std)
 	std->td.td_token = htole32(TD_IS_FREE);
 #endif
 	if (std->aux_dma.block != NULL) {
-		usb_freemem(&sc->sc_bus, &std->aux_dma);
+		usb_freemem_locked(&sc->sc_bus, &std->aux_dma);
 		std->aux_dma.block = NULL;
 		std->aux_data = NULL;
 		std->aux_len = 0;
@@ -1868,11 +1864,8 @@ uhci_aux_dma_alloc(uhci_softc_t *sc, uhci_soft_td_t *std, void *data, int len)
 		else
 			align = 1 << fls(len);
 
-		if (std->aux_dma.block != NULL) {
-			UHCI_LOCK(sc);
+		if (std->aux_dma.block != NULL)
 			usb_freemem(&sc->sc_bus, &std->aux_dma);
-			UHCI_UNLOCK(sc);
-		}
 		std->aux_dma.block = NULL;
 		err = usb_allocmem(&sc->sc_bus, len, align, &std->aux_dma);
 		if (err)
