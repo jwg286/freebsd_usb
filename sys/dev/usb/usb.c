@@ -380,10 +380,8 @@ usb_create_event_thread(void *arg)
 			TAILQ_INIT(&taskq->tasks);
 			if (kproc_create(usb_task_thread, taskq,
 			    &taskq->task_thread_proc, RFHIGHPID, 0,
-			    taskq->name)) {
-				printf("unable to create task thread\n");
-				panic("usb_create_event_thread task");
-			}
+			    taskq->name))
+				panic("unable to create task thread");
 		}
 	}
 }
