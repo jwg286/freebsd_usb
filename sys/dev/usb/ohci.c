@@ -69,6 +69,8 @@ __FBSDID("$FreeBSD: stable/7/sys/dev/usb/ohci.c 195498 2009-07-09 15:27:07Z n_hi
 #if defined(DIAGNOSTIC) && defined(__i386__) && defined(__FreeBSD__)
 #include <machine/cpu.h>
 #endif
+#include <sys/lock.h>
+#include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/sysctl.h>
@@ -131,8 +133,10 @@ static void		ohci_add_done(ohci_softc_t *, ohci_physaddr_t);
 static void		ohci_rhsc(ohci_softc_t *, usbd_xfer_handle);
 
 static usbd_status	ohci_device_request(usbd_xfer_handle xfer);
-static void		ohci_add_ed(ohci_soft_ed_t *, ohci_soft_ed_t *);
-static void		ohci_rem_ed(ohci_soft_ed_t *, ohci_soft_ed_t *);
+static void		ohci_add_ed(ohci_softc_t *, ohci_soft_ed_t *,
+			    ohci_soft_ed_t *);
+static void		ohci_rem_ed(ohci_softc_t *, ohci_soft_ed_t *,
+			    ohci_soft_ed_t *);
 static void		ohci_hash_add_td(ohci_softc_t *, ohci_soft_td_t *);
 static void		ohci_hash_rem_td(ohci_softc_t *, ohci_soft_td_t *);
 static ohci_soft_td_t  *ohci_hash_find_td(ohci_softc_t *, ohci_physaddr_t);
@@ -1802,14 +1806,15 @@ ohci_device_request(usbd_xfer_handle xfer)
 }
 
 /*
- * Add an ED to the schedule.  Called at splusb().
+ * Add an ED to the schedule.
  */
 void
-ohci_add_ed(ohci_soft_ed_t *sed, ohci_soft_ed_t *head)
+ohci_add_ed(ohci_softc_t *sc, ohci_soft_ed_t *sed, ohci_soft_ed_t *head)
 {
 	DPRINTFN(8,("ohci_add_ed: sed=%p head=%p\n", sed, head));
 
-	SPLUSBCHECK;
+	OHCI_LOCK_ASSERT(sc);
+
 	sed->next = head->next;
 	sed->ed.ed_nexted = head->ed.ed_nexted;
 	head->next = sed;
@@ -1817,14 +1822,14 @@ ohci_add_ed(ohci_soft_ed_t *sed, ohci_soft_ed_t *head)
 }
 
 /*
- * Remove an ED from the schedule.  Called at splusb().
+ * Remove an ED from the schedule.
  */
 void
-ohci_rem_ed(ohci_soft_ed_t *sed, ohci_soft_ed_t *head)
+ohci_rem_ed(ohci_softc_t *sc, ohci_soft_ed_t *sed, ohci_soft_ed_t *head)
 {
 	ohci_soft_ed_t *p;
 
-	SPLUSBCHECK;
+	OHCI_LOCK_ASSERT(sc);
 
 	/* XXX */
 	for (p = head; p != NULL && p->next != sed; p = p->next)
@@ -1846,22 +1851,21 @@ ohci_rem_ed(ohci_soft_ed_t *sed, ohci_soft_ed_t *head)
  */
 
 #define HASH(a) (((a) >> 4) % OHCI_HASH_SIZE)
-/* Called at splusb() */
 void
 ohci_hash_add_td(ohci_softc_t *sc, ohci_soft_td_t *std)
 {
 	int h = HASH(std->physaddr);
 
-	SPLUSBCHECK;
+	OHCI_LOCK_ASSERT(sc);
 
 	LIST_INSERT_HEAD(&sc->sc_hash_tds[h], std, hnext);
 }
 
-/* Called at splusb() */
 void
 ohci_hash_rem_td(ohci_softc_t *sc, ohci_soft_td_t *std)
 {
-	SPLUSBCHECK;
+
+	OHCI_LOCK_ASSERT(sc);
 
 	LIST_REMOVE(std, hnext);
 }
@@ -1890,13 +1894,12 @@ ohci_hash_find_td(ohci_softc_t *sc, ohci_physaddr_t a)
 	return (NULL);
 }
 
-/* Called at splusb() */
 void
 ohci_hash_add_itd(ohci_softc_t *sc, ohci_soft_itd_t *sitd)
 {
 	int h = HASH(sitd->physaddr);
 
-	SPLUSBCHECK;
+	OHCI_LOCK_ASSERT(sc);
 
 	DPRINTFN(10,("ohci_hash_add_itd: sitd=%p physaddr=0x%08lx\n",
 		    sitd, (u_long)sitd->physaddr));
@@ -1904,11 +1907,11 @@ ohci_hash_add_itd(ohci_softc_t *sc, ohci_soft_itd_t *sitd)
 	LIST_INSERT_HEAD(&sc->sc_hash_itds[h], sitd, hnext);
 }
 
-/* Called at splusb() */
 void
 ohci_hash_rem_itd(ohci_softc_t *sc, ohci_soft_itd_t *sitd)
 {
-	SPLUSBCHECK;
+
+	OHCI_LOCK_ASSERT(sc);
 
 	DPRINTFN(10,("ohci_hash_rem_itd: sitd=%p physaddr=0x%08lx\n",
 		    sitd, (u_long)sitd->physaddr));
@@ -2123,7 +2126,7 @@ ohci_open(usbd_pipe_handle pipe)
 			if (err)
 				goto bad;
 			s = splusb();
-			ohci_add_ed(sed, sc->sc_ctrl_head);
+			ohci_add_ed(sc, sed, sc->sc_ctrl_head);
 			splx(s);
 			break;
 		case UE_INTERRUPT:
@@ -2138,7 +2141,7 @@ ohci_open(usbd_pipe_handle pipe)
 		case UE_BULK:
 			pipe->methods = &ohci_device_bulk_methods;
 			s = splusb();
-			ohci_add_ed(sed, sc->sc_bulk_head);
+			ohci_add_ed(sc, sed, sc->sc_bulk_head);
 			splx(s);
 			break;
 		}
@@ -2194,7 +2197,7 @@ ohci_close_pipe(usbd_pipe_handle pipe, ohci_soft_ed_t *head)
 			printf("ohci_close_pipe: pipe still not empty\n");
 	}
 #endif
-	ohci_rem_ed(sed, head);
+	ohci_rem_ed(sc, sed, head);
 	/* Make sure the host controller is not touching this ED */
 	usb_delay_ms(&sc->sc_bus, 1);
 	splx(s);
@@ -3610,7 +3613,7 @@ ohci_setup_isoc(usbd_pipe_handle pipe)
 	iso->inuse = 0;
 
 	s = splusb();
-	ohci_add_ed(opipe->sed, sc->sc_isoc_head);
+	ohci_add_ed(sc, opipe->sed, sc->sc_isoc_head);
 	splx(s);
 
 	return (USBD_NORMAL_COMPLETION);

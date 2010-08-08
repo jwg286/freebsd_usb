@@ -213,7 +213,8 @@ static usbd_status	ehci_device_request(usbd_xfer_handle xfer);
 static usbd_status	ehci_device_setintr(ehci_softc_t *, ehci_soft_qh_t *,
 			    int ival);
 
-static void		ehci_add_qh(ehci_soft_qh_t *, ehci_soft_qh_t *);
+static void		ehci_add_qh(ehci_softc_t *, ehci_soft_qh_t *,
+				    ehci_soft_qh_t *);
 static void		ehci_rem_qh(ehci_softc_t *, ehci_soft_qh_t *,
 				    ehci_soft_qh_t *);
 static void		ehci_activate_qh(ehci_soft_qh_t *, ehci_soft_qtd_t *);
@@ -1461,13 +1462,13 @@ ehci_open(usbd_pipe_handle pipe)
 			goto bad1;
 		pipe->methods = &ehci_device_ctrl_methods;
 		s = splusb();
-		ehci_add_qh(sqh, sc->sc_async_head);
+		ehci_add_qh(sc, sqh, sc->sc_async_head);
 		splx(s);
 		break;
 	case UE_BULK:
 		pipe->methods = &ehci_device_bulk_methods;
 		s = splusb();
-		ehci_add_qh(sqh, sc->sc_async_head);
+		ehci_add_qh(sc, sqh, sc->sc_async_head);
 		splx(s);
 		break;
 	case UE_INTERRUPT:
@@ -1491,14 +1492,15 @@ ehci_open(usbd_pipe_handle pipe)
 }
 
 /*
- * Add an ED to the schedule.  Called at splusb().
+ * Add an ED to the schedule.
  * If in the async schedule, it will always have a next.
  * If in the intr schedule it may not.
  */
 void
-ehci_add_qh(ehci_soft_qh_t *sqh, ehci_soft_qh_t *head)
+ehci_add_qh(ehci_softc_t *sc, ehci_soft_qh_t *sqh, ehci_soft_qh_t *head)
 {
-	SPLUSBCHECK;
+
+	EHCI_LOCK_ASSERT(sc);
 
 	sqh->next = head->next;
 	sqh->prev = head;
@@ -1523,7 +1525,9 @@ ehci_add_qh(ehci_soft_qh_t *sqh, ehci_soft_qh_t *head)
 void
 ehci_rem_qh(ehci_softc_t *sc, ehci_soft_qh_t *sqh, ehci_soft_qh_t *head)
 {
-	SPLUSBCHECK;
+
+	EHCI_LOCK_ASSERT(sc);
+
 	/* XXX */
 	sqh->prev->qh.qh_link = sqh->qh.qh_link;
 	sqh->prev->next = sqh->next;
@@ -2695,7 +2699,7 @@ ehci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 			}
 		}
 	}
-	ehci_add_qh(sqh, psqh);
+	ehci_add_qh(sc, sqh, psqh);
 	/*
 	 * Step 5: Execute callback.
 	 */
@@ -3185,7 +3189,7 @@ ehci_device_setintr(ehci_softc_t *sc, ehci_soft_qh_t *sqh, int ival)
 
 	sqh->islot = islot;
 	isp = &sc->sc_islots[islot];
-	ehci_add_qh(sqh, isp->sqh);
+	ehci_add_qh(sc, sqh, isp->sqh);
 
 	return (USBD_NORMAL_COMPLETION);
 }
