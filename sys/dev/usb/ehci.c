@@ -2278,7 +2278,6 @@ ehci_alloc_sqtd(ehci_softc_t *sc)
 	usbd_status err;
 	int i, offs;
 	usb_dma_t dma;
-	int s;
 
 	if (sc->sc_freeqtds == NULL) {
 		DPRINTFN(2, ("ehci_alloc_sqtd: allocating chunk\n"));
@@ -2290,7 +2289,7 @@ ehci_alloc_sqtd(ehci_softc_t *sc)
 #endif
 		if (err)
 			return (NULL);
-		s = splusb();
+		EHCI_LOCK(sc);
 		for(i = 0; i < EHCI_SQTD_CHUNK; i++) {
 			offs = i * EHCI_SQTD_SIZE;
 			sqtd = KERNADDR(&dma, offs);
@@ -2298,10 +2297,10 @@ ehci_alloc_sqtd(ehci_softc_t *sc)
 			sqtd->nextqtd = sc->sc_freeqtds;
 			sc->sc_freeqtds = sqtd;
 		}
-		splx(s);
+		EHCI_UNLOCK(sc);
 	}
 
-	s = splusb();
+	EHCI_LOCK(sc);
 	sqtd = sc->sc_freeqtds;
 	sc->sc_freeqtds = sqtd->nextqtd;
 	sqtd->qtd.qtd_next = EHCI_NULL;
@@ -2313,7 +2312,7 @@ ehci_alloc_sqtd(ehci_softc_t *sc)
 	}
 	sqtd->nextqtd = NULL;
 	sqtd->xfer = NULL;
-	splx(s);
+	EHCI_UNLOCK(sc);
 
 	return (sqtd);
 }
