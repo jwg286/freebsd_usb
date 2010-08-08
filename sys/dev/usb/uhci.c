@@ -173,6 +173,8 @@ static void		uhci_exit_ctl_q(uhci_softc_t *, uhci_soft_qh_t *);
 
 static void		uhci_free_std_chain(uhci_softc_t *,
 					    uhci_soft_td_t *, uhci_soft_td_t *);
+static void		uhci_free_std_chain_locked(uhci_softc_t *,
+					    uhci_soft_td_t *, uhci_soft_td_t *);
 static usbd_status	uhci_alloc_std_chain(struct uhci_pipe *,
 			    uhci_softc_t *, int, int, u_int16_t,
 			    usbd_xfer_handle xfer,
@@ -1650,6 +1652,7 @@ uhci_alloc_std(uhci_softc_t *sc)
 			  UHCI_TD_ALIGN, &dma);
 		if (err)
 			return (0);
+		UHCI_LOCK(sc);
 		for(i = 0; i < UHCI_STD_CHUNK; i++) {
 			offs = i * UHCI_STD_SIZE;
 			std = KERNADDR(&dma, offs);
@@ -1660,9 +1663,12 @@ uhci_alloc_std(uhci_softc_t *sc)
 			std->aux_len = 0;
 			sc->sc_freetds = std;
 		}
+		UHCI_UNLOCK(sc);
 	}
+	UHCI_LOCK(sc);
 	std = sc->sc_freetds;
 	sc->sc_freetds = std->link.std;
+	UHCI_UNLOCK(sc);
 	memset(&std->td, 0, sizeof(uhci_td_t));
 	return std;
 }
@@ -1727,8 +1733,8 @@ uhci_free_sqh(uhci_softc_t *sc, uhci_soft_qh_t *sqh)
 }
 
 void
-uhci_free_std_chain(uhci_softc_t *sc, uhci_soft_td_t *std,
-		    uhci_soft_td_t *stdend)
+uhci_free_std_chain_locked(uhci_softc_t *sc, uhci_soft_td_t *std,
+			   uhci_soft_td_t *stdend)
 {
 	uhci_soft_td_t *p;
 
@@ -1738,6 +1744,16 @@ uhci_free_std_chain(uhci_softc_t *sc, uhci_soft_td_t *std,
 		p = std->link.std;
 		uhci_free_std(sc, std);
 	}
+}
+
+void
+uhci_free_std_chain(uhci_softc_t *sc, uhci_soft_td_t *std,
+		    uhci_soft_td_t *stdend)
+{
+
+	UHCI_LOCK(sc);
+	uhci_free_std_chain_locked(sc, std, stdend);
+	UHCI_UNLOCK(sc);
 }
 
 usbd_status
@@ -2953,7 +2969,8 @@ uhci_device_ctrl_done(usbd_xfer_handle xfer)
 		uhci_remove_hs_ctrl(sc, upipe->u.ctl.sqh);
 
 	if (upipe->u.ctl.length != 0)
-		uhci_free_std_chain(sc, ii->stdstart->link.std, ii->stdend);
+		uhci_free_std_chain_locked(sc, ii->stdstart->link.std,
+		    ii->stdend);
 	ii->stdstart = NULL;
 	ii->stdend = NULL;
 
@@ -2975,14 +2992,16 @@ uhci_device_bulk_done(usbd_xfer_handle xfer)
 	if (!uhci_active_intr_info(ii))
 		return;
 
+	UHCI_LOCK(sc);
 	uhci_del_intr_info(ii);	/* remove from active list */
 
 	uhci_remove_bulk(sc, upipe->u.bulk.sqh);
 
-	uhci_free_std_chain(sc, ii->stdstart, NULL);
+	uhci_free_std_chain_locked(sc, ii->stdstart, NULL);
 	ii->stdstart = NULL;
 	ii->stdend = NULL;
 
+	UHCI_UNLOCK(sc);
 	DPRINTFN(5, ("uhci_device_bulk_done: length=%d\n", xfer->actlen));
 }
 
