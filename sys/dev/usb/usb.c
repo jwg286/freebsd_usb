@@ -756,9 +756,6 @@ usb_discover(void *v)
 {
 	struct usb_softc *sc = v;
 
-	/* splxxx should be changed to mutexes for preemption safety some day */
-	int s;
-
 	DPRINTFN(2,("usb_discover\n"));
 #ifdef USB_DEBUG
 	if (usb_noexplore > 1)
