@@ -366,11 +366,9 @@ usb_create_event_thread(void *arg)
 	int i;
 
 	if (kproc_create(usb_event_thread, sc, &sc->sc_event_thread,
-	      RFHIGHPID, 0, device_get_nameunit(sc->sc_dev))) {
-		printf("%s: unable to create event thread for\n",
-		       device_get_nameunit(sc->sc_dev));
-		panic("usb_create_event_thread");
-	}
+	      RFHIGHPID, 0, device_get_nameunit(sc->sc_dev)))
+		panic("%s: unable to create event thread for\n",
+		    device_get_nameunit(sc->sc_dev));
 	for (i = 0; i < USB_NUM_TASKQS; i++) {
 		taskq = &usb_taskq[i];
 
