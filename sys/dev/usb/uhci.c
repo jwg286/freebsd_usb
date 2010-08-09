@@ -2038,6 +2038,7 @@ void
 uhci_device_bulk_abort(usbd_xfer_handle xfer)
 {
 	DPRINTF(("uhci_device_bulk_abort:\n"));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 	uhci_abort_xfer(xfer, USBD_CANCELLED);
 }
 
@@ -2341,6 +2342,7 @@ void
 uhci_device_ctrl_abort(usbd_xfer_handle xfer)
 {
 	DPRINTF(("uhci_device_ctrl_abort:\n"));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 	uhci_abort_xfer(xfer, USBD_CANCELLED);
 }
 
@@ -2355,6 +2357,7 @@ void
 uhci_device_intr_abort(usbd_xfer_handle xfer)
 {
 	DPRINTFN(1,("uhci_device_intr_abort: xfer=%p\n", xfer));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 	if (xfer->pipe->intrxfer == xfer) {
 		DPRINTFN(1,("uhci_device_intr_abort: remove\n"));
 		xfer->pipe->intrxfer = NULL;
@@ -2706,6 +2709,8 @@ uhci_device_isoc_abort(usbd_xfer_handle xfer)
 	uhci_soft_td_t **stds = upipe->u.iso.stds;
 	uhci_soft_td_t *std;
 	int i, n, s, nframes, maxlen, len;
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	s = splusb();
 
@@ -3725,6 +3730,7 @@ void
 uhci_root_ctrl_abort(usbd_xfer_handle xfer)
 {
 	/* Nothing to do, all transfers are synchronous. */
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 /* Close the root pipe. */
@@ -3739,6 +3745,8 @@ void
 uhci_root_intr_abort(usbd_xfer_handle xfer)
 {
 	uhci_softc_t *sc = (uhci_softc_t *)xfer->pipe->device->bus;
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	callout_stop(&sc->sc_poll_handle);
 	sc->sc_intr_xfer = NULL;

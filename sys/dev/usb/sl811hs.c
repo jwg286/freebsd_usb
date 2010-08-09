@@ -1085,6 +1085,7 @@ void
 slhci_root_ctrl_abort(usbd_xfer_handle xfer)
 {
 	DPRINTF(D_TRACE, ("SLRCabort "));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 void
@@ -1140,6 +1141,7 @@ static void
 slhci_root_intr_abort(usbd_xfer_handle xfer)
 {
 	DPRINTF(D_TRACE, ("SLRIabort "));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 static void
@@ -1252,6 +1254,7 @@ static void
 slhci_device_ctrl_abort(usbd_xfer_handle xfer)
 {
 	DPRINTF(D_TRACE, ("Cab "));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 	slhci_abort_xfer(xfer, USBD_CANCELLED);
 }
 
@@ -1360,6 +1363,8 @@ slhci_device_intr_abort(usbd_xfer_handle xfer)
 
 	DPRINTF(D_TRACE, ("INTRabort "));
 
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 	sx = xfer->hcpriv;
 	if (sx) {
 		usb_uncallout(sx->sx_callout_t, slhci_poll_device, sx);
@@ -1404,6 +1409,7 @@ static void
 slhci_device_isoc_abort(usbd_xfer_handle xfer)
 {
 	DPRINTF(D_TRACE, ("Sab "));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 static void
@@ -1439,6 +1445,7 @@ static void
 slhci_device_bulk_abort(usbd_xfer_handle xfer)
 {
 	DPRINTF(D_TRACE, ("Bab "));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 static void

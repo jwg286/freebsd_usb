@@ -2769,6 +2769,7 @@ static void
 ohci_root_ctrl_abort(usbd_xfer_handle xfer)
 {
 	/* Nothing to do, all transfers are synchronous. */
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 /* Close the root pipe. */
@@ -2814,6 +2815,8 @@ static void
 ohci_root_intr_abort(usbd_xfer_handle xfer)
 {
 	int s;
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	if (xfer->pipe->intrxfer == xfer) {
 		DPRINTF(("ohci_root_intr_abort: remove\n"));
@@ -2885,6 +2888,7 @@ static void
 ohci_device_ctrl_abort(usbd_xfer_handle xfer)
 {
 	DPRINTF(("ohci_device_ctrl_abort: xfer=%p\n", xfer));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 	ohci_abort_xfer(xfer, USBD_CANCELLED);
 }
 
@@ -3037,6 +3041,7 @@ static void
 ohci_device_bulk_abort(usbd_xfer_handle xfer)
 {
 	DPRINTF(("ohci_device_bulk_abort: xfer=%p\n", xfer));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 	ohci_abort_xfer(xfer, USBD_CANCELLED);
 }
 
@@ -3181,6 +3186,9 @@ ohci_device_intr_insert(ohci_softc_t *sc, usbd_xfer_handle xfer)
 static void
 ohci_device_intr_abort(usbd_xfer_handle xfer)
 {
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 	if (xfer->pipe->intrxfer == xfer) {
 		DPRINTF(("ohci_device_intr_abort: remove\n"));
 		xfer->pipe->intrxfer = NULL;
@@ -3522,6 +3530,8 @@ ohci_device_isoc_abort(usbd_xfer_handle xfer)
 	ohci_soft_ed_t *sed;
 	ohci_soft_itd_t *sitd, *sitdnext, *tmp_sitd;
 	int s,undone,num_sitds;
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	s = splusb();
 	opipe->aborting = 1;

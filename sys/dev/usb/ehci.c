@@ -2139,6 +2139,7 @@ static void
 ehci_root_ctrl_abort(usbd_xfer_handle xfer)
 {
 	/* Nothing to do, all transfers are synchronous. */
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 }
 
 /* Close the root pipe. */
@@ -2860,6 +2861,7 @@ static void
 ehci_device_ctrl_abort(usbd_xfer_handle xfer)
 {
 	DPRINTF(("ehci_device_ctrl_abort: xfer=%p\n", xfer));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 	ehci_abort_xfer(xfer, USBD_CANCELLED);
 }
 
@@ -3149,6 +3151,7 @@ static void
 ehci_device_bulk_abort(usbd_xfer_handle xfer)
 {
 	DPRINTF(("ehci_device_bulk_abort: xfer=%p\n", xfer));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 	ehci_abort_xfer(xfer, USBD_CANCELLED);
 }
 
@@ -3334,6 +3337,7 @@ static void
 ehci_device_intr_abort(usbd_xfer_handle xfer)
 {
 	DPRINTFN(1, ("ehci_device_intr_abort: xfer=%p\n", xfer));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 	if (xfer->pipe->intrxfer == xfer) {
 		DPRINTFN(1, ("ehci_device_intr_abort: remove\n"));
 		xfer->pipe->intrxfer = NULL;
