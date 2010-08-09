@@ -743,7 +743,10 @@ slhci_root_ctrl_transfer(usbd_xfer_handle xfer)
 	 * Pipe isn't running (otherwise error would be USBD_INPROG),
 	 * so start it first.
 	 */
-	return slhci_root_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = slhci_root_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 usbd_status
@@ -1118,7 +1121,10 @@ slhci_root_intr_transfer(usbd_xfer_handle xfer)
 	 * Pipe isn't running (otherwise error would be USBD_INPROG),
 	 * start first.
 	 */
-	return slhci_root_intr_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = slhci_root_intr_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 static usbd_status
@@ -1174,7 +1180,10 @@ slhci_device_ctrl_transfer(usbd_xfer_handle xfer)
 	if (error)
 		return error;
 
-	return slhci_device_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = slhci_device_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 static usbd_status
@@ -1283,7 +1292,10 @@ slhci_device_intr_transfer(usbd_xfer_handle xfer)
 	if (error)
 		return error;
 
-	return slhci_device_intr_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = slhci_device_intr_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 static usbd_status

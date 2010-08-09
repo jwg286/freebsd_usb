@@ -1711,7 +1711,10 @@ ehci_root_ctrl_transfer(usbd_xfer_handle xfer)
 		return (err);
 
 	/* Pipe isn't running, start first */
-	return (ehci_root_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = ehci_root_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 static usbd_status
@@ -2099,10 +2102,8 @@ ehci_root_ctrl_start(usbd_xfer_handle xfer)
 	err = USBD_NORMAL_COMPLETION;
  ret:
 	xfer->status = err;
-	USB_PIPE_LOCK(xfer->pipe);
 	hacksync(xfer);	/* XXX to compensate for usb_transfer_complete */
 	usb_transfer_complete(xfer);
-	USB_PIPE_UNLOCK(xfer->pipe);
 	return (USBD_IN_PROGRESS);
 }
 
@@ -2168,7 +2169,10 @@ ehci_root_intr_transfer(usbd_xfer_handle xfer)
 		return (err);
 
 	/* Pipe isn't running, start first */
-	return (ehci_root_intr_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = ehci_root_intr_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 static usbd_status
@@ -2799,7 +2803,10 @@ ehci_device_ctrl_transfer(usbd_xfer_handle xfer)
 		return (err);
 
 	/* Pipe isn't running, start first */
-	return (ehci_device_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = ehci_device_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 static usbd_status
@@ -3035,7 +3042,10 @@ ehci_device_bulk_transfer(usbd_xfer_handle xfer)
 		return (err);
 
 	/* Pipe isn't running, start first */
-	return (ehci_device_bulk_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = ehci_device_bulk_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 usbd_status
@@ -3226,7 +3236,10 @@ ehci_device_intr_transfer(usbd_xfer_handle xfer)
 	 * Pipe isn't running (otherwise err would be USBD_INPROG),
 	 * so start it first.
 	 */
-	return (ehci_device_intr_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = ehci_device_intr_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 static usbd_status

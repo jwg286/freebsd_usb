@@ -2451,7 +2451,10 @@ ohci_root_ctrl_transfer(usbd_xfer_handle xfer)
 		return (err);
 
 	/* Pipe isn't running, start first */
-	return (ohci_root_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = ohci_root_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 static usbd_status
@@ -2791,7 +2794,10 @@ ohci_root_intr_transfer(usbd_xfer_handle xfer)
 		return (err);
 
 	/* Pipe isn't running, start first */
-	return (ohci_root_intr_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = ohci_root_intr_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 static usbd_status
@@ -2852,7 +2858,10 @@ ohci_device_ctrl_transfer(usbd_xfer_handle xfer)
 		return (err);
 
 	/* Pipe isn't running, start first */
-	return (ohci_device_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = ohci_device_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 static usbd_status
@@ -2930,7 +2939,10 @@ ohci_device_bulk_transfer(usbd_xfer_handle xfer)
 		return (err);
 
 	/* Pipe isn't running, start first */
-	return (ohci_device_bulk_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = ohci_device_bulk_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 static usbd_status
@@ -3072,7 +3084,10 @@ ohci_device_intr_transfer(usbd_xfer_handle xfer)
 		return (err);
 
 	/* Pipe isn't running, start first */
-	return (ohci_device_intr_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = ohci_device_intr_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 static usbd_status
@@ -3323,8 +3338,11 @@ ohci_device_isoc_transfer(usbd_xfer_handle xfer)
 	ohci_device_isoc_enter(xfer);
 
 	/* and start if the pipe wasn't running */
-	if (!err)
-		ohci_device_isoc_start(STAILQ_FIRST(&xfer->pipe->queue));
+	if (!err) {
+		USB_PIPE_LOCK(xfer->pipe);
+		err = ohci_device_isoc_start(STAILQ_FIRST(&xfer->pipe->queue));
+		USB_PIPE_UNLOCK(xfer->pipe);
+	}
 
 	return (err);
 }
