@@ -49,6 +49,7 @@
 #include <net80211/ieee80211_amrr.h>
 #include <net80211/ieee80211_phy.h>
 #include <net80211/ieee80211_radiotap.h>
+#include <net80211/ieee80211_ratectl.h>
 #include <net80211/ieee80211_regdomain.h>
 
 #include <net/bpf.h>
@@ -245,7 +246,6 @@ static void	zyd_init_locked(struct zyd_softc *);
 static void	zyd_init(void *);
 static void	zyd_stop(struct zyd_softc *, int);
 static int	zyd_loadfirmware(struct zyd_softc *);
-static void	zyd_newassoc(struct ieee80211_node *, int);
 static void	zyd_scantask(void *);
 static void	zyd_scan_start(struct ieee80211com *);
 static void	zyd_scan_end(struct ieee80211com *);
@@ -334,8 +334,7 @@ zyd_attach(device_t dev)
 	}
 	ifp->if_softc = sc;
 	if_initname(ifp, "zyd", device_get_unit(sc->sc_dev));
-	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST |
-	    IFF_NEEDSGIANT; /* USB stack is still under Giant lock */
+	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_init = zyd_init;
 	ifp->if_ioctl = zyd_ioctl;
 	ifp->if_start = zyd_start;
@@ -346,7 +345,6 @@ zyd_attach(device_t dev)
 	ic->ic_ifp = ifp;
 	ic->ic_phytype = IEEE80211_T_OFDM;	/* not only, but not used */
 	ic->ic_opmode = IEEE80211_M_STA;
-	IEEE80211_ADDR_COPY(ic->ic_myaddr, sc->sc_bssid);
 
 	/* set device capabilities */
 	ic->ic_caps =
@@ -363,8 +361,7 @@ zyd_attach(device_t dev)
 	setbit(&bands, IEEE80211_MODE_11G);
 	ieee80211_init_channels(ic, NULL, &bands);
 
-	ieee80211_ifattach(ic);
-	ic->ic_newassoc = zyd_newassoc;
+	ieee80211_ifattach(ic, sc->sc_bssid);
 	ic->ic_raw_xmit = zyd_raw_xmit;
 	ic->ic_node_alloc = zyd_node_alloc;
 	ic->ic_scan_start = zyd_scan_start;
@@ -447,10 +444,8 @@ zyd_vap_create(struct ieee80211com *ic,
 	zvp->newstate = vap->iv_newstate;
 	vap->iv_newstate = zyd_newstate;
 
-	ieee80211_amrr_init(&zvp->amrr, vap,
-	    IEEE80211_AMRR_MIN_SUCCESS_THRESHOLD,
-	    IEEE80211_AMRR_MAX_SUCCESS_THRESHOLD,
-	    1000 /* 1 sec */);
+	ieee80211_ratectl_init(vap);
+	ieee80211_ratectl_setinterval(vap, 1000 /* 1 sec */);
 
 	/* complete setup */
 	ieee80211_vap_attach(vap, ieee80211_media_change,
@@ -464,7 +459,7 @@ zyd_vap_delete(struct ieee80211vap *vap)
 {
 	struct zyd_vap *zvp = ZYD_VAP(vap);
 
-	ieee80211_amrr_cleanup(&zvp->amrr);
+	ieee80211_ratectl_deinit(vap);
 	ieee80211_vap_detach(vap);
 	free(zvp, M_80211_VAP);
 }
@@ -697,9 +692,8 @@ zyd_task(void *arg)
 
 fail:
 	IEEE80211_LOCK(ic);
+	/* XXX no checking return value. */
 	zvp->newstate(vap, sc->sc_state, sc->sc_arg);
-	if (vap->iv_newstate_cb != NULL)
-		vap->iv_newstate_cb(vap, sc->sc_state, sc->sc_arg);
 	IEEE80211_UNLOCK(ic);
 }
 
@@ -2115,6 +2109,7 @@ zyd_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		struct ieee80211com *ic = ifp->if_l2com;
 		struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
 		struct ieee80211_node *ni;
+		int retrycnt = 1;
 
 		DPRINTF(sc, ZYD_DEBUG_TX_PROC,
 		    "retry intr: rate=0x%x addr=%s count=%d (0x%x)\n",
@@ -2128,8 +2123,8 @@ zyd_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		 */
 		ni = ieee80211_find_txnode(vap, retry->macaddr);
 		if (ni != NULL) {
-			ieee80211_amrr_tx_complete(&ZYD_NODE(ni)->amn,
-			    IEEE80211_AMRR_FAILURE, 1);
+			ieee80211_ratectl_tx_complete(vap, ni,
+			    IEEE80211_RATECTL_TX_FAILURE, &retrycnt, NULL);
 			ieee80211_free_node(ni);
 		}
 		if (le16toh(retry->count) & 0x100)
@@ -2243,10 +2238,10 @@ zyd_rx_data(struct zyd_softc *sc, const uint8_t *buf, uint16_t len)
 
 	ni = ieee80211_find_rxnode(ic, mtod(m, struct ieee80211_frame_min *));
 	if (ni != NULL) {
-		(void)ieee80211_input(ni, m, rssi, nf, 0);
+		(void)ieee80211_input(ni, m, rssi, nf);
 		ieee80211_free_node(ni);
 	} else
-		(void)ieee80211_input_all(ic, m, rssi, nf, 0);
+		(void)ieee80211_input_all(ic, m, rssi, nf);
 }
 
 static void
@@ -2485,8 +2480,8 @@ zyd_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 	ni = data->ni;
 	/* update rate control statistics */
-	ieee80211_amrr_tx_complete(&ZYD_NODE(ni)->amn,
-	    IEEE80211_AMRR_SUCCESS, 0);
+	ieee80211_ratectl_tx_complete(ni->ni_vap, ni,
+	    IEEE80211_RATECTL_TX_SUCCESS, NULL, NULL);
 
 	/*
 	 * Do any tx complete callback.  Note this must
@@ -2542,7 +2537,7 @@ zyd_tx_data(struct zyd_softc *sc, struct mbuf *m0, struct ieee80211_node *ni)
 	} else if (tp->ucastrate != IEEE80211_FIXED_RATE_NONE) {
 		rate = tp->ucastrate;
 	} else {
-		(void) ieee80211_amrr_choose(ni, &ZYD_NODE(ni)->amn);
+		(void) ieee80211_ratectl_rate(ni, NULL, 0);
 		rate = ni->ni_txrate;
 	}
 
@@ -2657,12 +2652,6 @@ zyd_start(struct ifnet *ifp)
 			break;
 		}
 		ni = (struct ieee80211_node *)m->m_pkthdr.rcvif;
-		m = ieee80211_encap(ni, m);
-		if (m == NULL) {
-			ieee80211_free_node(ni);
-			ifp->if_oerrors++;
-			continue;
-		}
 		if (zyd_tx_data(sc, m, ni) != 0) {
 			ieee80211_free_node(ni);
 			ifp->if_oerrors++;
@@ -2841,10 +2830,10 @@ zyd_init_locked(struct zyd_softc *sc)
 	/* reset softc variables.  */
 	sc->sc_txidx = 0;
 
-	IEEE80211_ADDR_COPY(ic->ic_myaddr, IF_LLADDR(ifp));
+	IEEE80211_ADDR_COPY(sc->sc_bssid, IF_LLADDR(ifp));
 	DPRINTF(sc, ZYD_DEBUG_INIT, "setting MAC address to %s\n",
-	    ether_sprintf(ic->ic_myaddr));
-	error = zyd_set_macaddr(sc, ic->ic_myaddr);
+	    ether_sprintf(sc->sc_myaddr));
+	error = zyd_set_macaddr(sc, sc->sc_bssid);
 	if (error != 0)
 		return;
 
@@ -3019,14 +3008,6 @@ zyd_loadfirmware(struct zyd_softc *sc)
 	sc->sc_flags |= ZYD_FLAG_FWLOADED;
 
 	return (stat & 0x80) ? (EIO) : (0);
-}
-
-static void
-zyd_newassoc(struct ieee80211_node *ni, int isnew)
-{
-	struct ieee80211vap *vap = ni->ni_vap;
-
-	ieee80211_amrr_node_init(&ZYD_VAP(vap)->amrr, &ZYD_NODE(ni)->amn, ni);
 }
 
 static void
