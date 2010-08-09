@@ -674,21 +674,22 @@ ukbd_enable_intr(keyboard_t *kbd, int on, usbd_intr_t *func)
 static int
 ukbd_term(keyboard_t *kbd)
 {
+	struct ukbd_softc *sc;
 	ukbd_state_t *state;
 	int error;
-	int s;
-
-	s = splusb();
 
 	state = (ukbd_state_t *)kbd->kb_data;
+	sc = state->ks_softc;
 	DPRINTF(("ukbd_term: ks_ifstate=0x%x\n", state->ks_ifstate));
 
 	callout_stop(&state->ks_timeout_handle);
 
+	UKBD_LOCK(sc);
+
 	if (state->ks_ifstate & INTRENABLED)
 		ukbd_enable_intr(kbd, FALSE, NULL);
 	if (state->ks_ifstate & INTRENABLED) {
-		splx(s);
+		UKBD_UNLOCK(sc);
 		DPRINTF(("ukbd_term: INTRENABLED!\n"));
 		return ENXIO;
 	}
@@ -706,7 +707,7 @@ ukbd_term(keyboard_t *kbd)
 		}
 	}
 
-	splx(s);
+	UKBD_UNLOCK(sc);
 	return error;
 }
 
@@ -925,11 +926,12 @@ ukbd_enable(keyboard_t *kbd)
 static int
 ukbd_disable(keyboard_t *kbd)
 {
-	int s;
+	ukbd_state_t *state = kbd->kb_data;
+	struct ukbd_softc *sc = state->ks_softc;
 
-	s = splusb();
+	UKBD_LOCK(sc);
 	KBD_DEACTIVATE(kbd);
-	splx(s);
+	UKBD_UNLOCK(sc);
 	return 0;
 }
 
