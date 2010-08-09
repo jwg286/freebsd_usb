@@ -2378,7 +2378,6 @@ uhci_device_intr_close(usbd_pipe_handle pipe)
 	struct uhci_pipe *upipe = (struct uhci_pipe *)pipe;
 	uhci_softc_t *sc = (uhci_softc_t *)pipe->device->bus;
 	int i, npoll;
-	int s;
 
 	/* Unlink descriptors from controller data structures. */
 	npoll = upipe->u.intr.npoll;
