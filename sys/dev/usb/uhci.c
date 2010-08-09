@@ -3099,7 +3099,9 @@ uhci_device_setintr(uhci_softc_t *sc, struct uhci_pipe *upipe, int ival)
 
 	upipe->u.intr.npoll = npoll;
 	upipe->u.intr.qhs =
-		malloc(npoll * sizeof(uhci_soft_qh_t *), M_USBHC, M_WAITOK);
+		malloc(npoll * sizeof(uhci_soft_qh_t *), M_USBHC, M_NOWAIT);
+	if (upipe->u.intr.qhs == NULL)
+		return (USBD_NOMEM);
 
 	/*
 	 * Figure out which offset in the schedule that has most
