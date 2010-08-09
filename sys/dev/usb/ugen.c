@@ -158,7 +158,6 @@ d_purge_t ugenpurge;
 
 static struct cdevsw ugenctl_cdevsw = {
 	.d_version =	D_VERSION,
-	.d_flags =	D_NEEDGIANT,
 	.d_open =	ugenopen,
 	.d_close =	ugenclose,
 	.d_ioctl =	ugenioctl,
@@ -168,7 +167,6 @@ static struct cdevsw ugenctl_cdevsw = {
 
 static struct cdevsw ugen_cdevsw = {
 	.d_version =	D_VERSION,
-	.d_flags =	D_NEEDGIANT,
 	.d_open =	ugenopen,
 	.d_close =	ugenclose,
 	.d_read =	ugenread,
@@ -693,7 +691,6 @@ ugen_do_read(struct ugen_softc *sc, int endpt, struct uio *uio, int flag)
 	char buf[UGEN_BBSIZE];
 	usbd_xfer_handle xfer;
 	usbd_status err;
-	int s;
 	int error = 0, doneone = 0;
 	u_char buffer[UGEN_CHUNK];
 
@@ -719,16 +716,16 @@ ugen_do_read(struct ugen_softc *sc, int endpt, struct uio *uio, int flag)
 	switch (sce->edesc->bmAttributes & UE_XFERTYPE) {
 	case UE_INTERRUPT:
 		/* Block until activity occurred. */
-		s = splusb();
+		UGEN_LOCK(sc);
 		while (sce->q_length == 0) {
 			if (flag & O_NONBLOCK) {
-				splx(s);
+				UGEN_UNLOCK(sc);
 				return (EWOULDBLOCK);
 			}
 			sce->state |= UGEN_ASLP;
 			DPRINTFN(5, ("ugenread: sleep on %p\n", sce));
-			error = tsleep(sce, PZERO | PCATCH, "ugenri",
-			    (sce->timeout * hz + 999) / 1000);
+			error = msleep(sce, &sc->sc_mtx, PZERO | PCATCH,
+			    "ugenri", (sce->timeout * hz + 999) / 1000);
 			sce->state &= ~UGEN_ASLP;
 			DPRINTFN(5, ("ugenread: woke, error=%d\n", error));
 			if (sc->sc_dying)
@@ -740,7 +737,7 @@ ugen_do_read(struct ugen_softc *sc, int endpt, struct uio *uio, int flag)
 			if (error)
 				break;
 		}
-		splx(s);
+		UGEN_UNLOCK(sc);
 
 		/* Transfer as many chunks as possible. */
 		while (sce->q_length > 0 && uio->uio_resid > 0 && !error) {
@@ -789,16 +786,16 @@ ugen_do_read(struct ugen_softc *sc, int endpt, struct uio *uio, int flag)
 		usbd_free_xfer(xfer);
 		break;
 	case UE_ISOCHRONOUS:
-		s = splusb();
+		UGEN_LOCK(sc);
 		while (sce->cur == sce->fill) {
 			if (flag & O_NONBLOCK) {
-				splx(s);
+				UGEN_UNLOCK(sc);
 				return (EWOULDBLOCK);
 			}
 			sce->state |= UGEN_ASLP;
 			DPRINTFN(5, ("ugenread: sleep on %p\n", sce));
-			error = tsleep(sce, PZERO | PCATCH, "ugenri",
-			    (sce->timeout * hz + 999) / 1000);
+			error = msleep(sce, &sc->sc_mtx, PZERO | PCATCH,
+			    "ugenri", (sce->timeout * hz + 999) / 1000);
 			sce->state &= ~UGEN_ASLP;
 			DPRINTFN(5, ("ugenread: woke, error=%d\n", error));
 			if (sc->sc_dying)
@@ -827,7 +824,7 @@ ugen_do_read(struct ugen_softc *sc, int endpt, struct uio *uio, int flag)
 			if(sce->cur >= sce->limit)
 				sce->cur = sce->ibuf;
 		}
-		splx(s);
+		UGEN_UNLOCK(sc);
 		break;
 
 
@@ -1534,7 +1531,6 @@ ugenpoll(struct cdev *dev, int events, struct thread *p)
 	struct ugen_endpoint *sce_in, *sce_out;
 	usb_endpoint_descriptor_t *edesc;
 	int revents = 0;
-	int s;
 
 	sc = devclass_get_softc(ugen_devclass, UGENUNIT(dev));
 
@@ -1554,7 +1550,7 @@ ugenpoll(struct cdev *dev, int events, struct thread *p)
 	if (sce_out->edesc == NULL || sce_out->pipeh == NULL)
 		sce_out = NULL;
 
-	s = splusb();
+	UGEN_LOCK(sc);
 	switch (edesc->bmAttributes & UE_XFERTYPE) {
 	case UE_INTERRUPT:
 		if (sce_in != NULL && (events & (POLLIN | POLLRDNORM))) {
@@ -1596,7 +1592,7 @@ ugenpoll(struct cdev *dev, int events, struct thread *p)
 	default:
 		break;
 	}
-	splx(s);
+	UGEN_UNLOCK(sc);
 	return (revents);
 }
 
