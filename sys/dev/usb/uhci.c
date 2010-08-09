@@ -1964,6 +1964,8 @@ uhci_device_bulk_start(usbd_xfer_handle xfer)
 	DPRINTFN(3, ("uhci_device_bulk_start: xfer=%p len=%d flags=%d ii=%p\n",
 		     xfer, xfer->length, xfer->flags, ii));
 
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 	if (sc->sc_dying)
 		return (USBD_IOERROR);
 
@@ -2218,6 +2220,8 @@ uhci_device_ctrl_start(usbd_xfer_handle xfer)
 	uhci_softc_t *sc = (uhci_softc_t *)xfer->pipe->device->bus;
 	usbd_status err;
 
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 	if (sc->sc_dying)
 		return (USBD_IOERROR);
 
@@ -2264,6 +2268,8 @@ uhci_device_intr_start(usbd_xfer_handle xfer)
 	usbd_status err;
 	int isread, endpt;
 	int i;
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	if (sc->sc_dying)
 		return (USBD_IOERROR);
@@ -2651,6 +2657,8 @@ uhci_device_isoc_start(usbd_xfer_handle xfer)
 	int s, i;
 
 	DPRINTFN(5,("uhci_device_isoc_start: xfer=%p\n", xfer));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	if (sc->sc_dying)
 		return (USBD_IOERROR);
@@ -3396,6 +3404,8 @@ uhci_root_ctrl_start(usbd_xfer_handle xfer)
 	usb_port_status_t ps;
 	usbd_status err;
 
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 	if (sc->sc_dying)
 		return (USBD_IOERROR);
 
@@ -3770,6 +3780,8 @@ uhci_root_intr_start(usbd_xfer_handle xfer)
 
 	DPRINTFN(3, ("uhci_root_intr_start: xfer=%p len=%d flags=%d\n",
 		     xfer, xfer->length, xfer->flags));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	if (sc->sc_dying)
 		return (USBD_IOERROR);

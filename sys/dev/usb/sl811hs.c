@@ -761,6 +761,8 @@ slhci_root_ctrl_start(usbd_xfer_handle xfer)
 
 	DPRINTF(D_TRACE, ("SLRCstart "));
 
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 	req = &xfer->request;
 
 	len = UGETW(req->wLength);
@@ -1126,6 +1128,8 @@ slhci_root_intr_start(usbd_xfer_handle xfer)
 
 	DPRINTF(D_TRACE, ("SLRIstart "));
 
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 	sc->sc_interval = MS_TO_TICKS(xfer->pipe->endpoint->edesc->bInterval);
 	usb_callout(sc->sc_poll_handle, sc->sc_interval, slhci_poll_hub, xfer);
 	sc->sc_intr_xfer = xfer;
@@ -1185,6 +1189,9 @@ slhci_device_ctrl_start(usbd_xfer_handle xfer)
 	u_int8_t toggle = 0;
 
 	DPRINTF(D_TRACE, ("st "));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 #ifdef SLHCI_DEBUG
 	if ((slhci_debug & D_TRACE))
 		print_req_hub(req);
@@ -1283,6 +1290,8 @@ slhci_device_intr_start(usbd_xfer_handle xfer)
 	struct slhci_xfer *sx;
 
 	DPRINTF(D_TRACE, ("INTRstart "));
+
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 
 	sx = malloc(sizeof(*sx), M_USB, M_NOWAIT);
 	if (sx == NULL)
@@ -1387,6 +1396,7 @@ static usbd_status
 slhci_device_isoc_start(usbd_xfer_handle xfer)
 {
 	DPRINTF(D_TRACE, ("st "));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 	return USBD_NORMAL_COMPLETION;
 }
 
@@ -1421,6 +1431,7 @@ static usbd_status
 slhci_device_bulk_start(usbd_xfer_handle xfer)
 {
 	DPRINTF(D_TRACE, ("st "));
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
 	return USBD_NORMAL_COMPLETION;
 }
 
