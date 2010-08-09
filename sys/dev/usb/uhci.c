@@ -2114,12 +2114,14 @@ uhci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 	 * use of the xfer.  Also make sure the soft interrupt routine
 	 * has run.
 	 */
+	USB_PIPE_UNLOCK(xfer->pipe);
 	UHCI_LOCK(sc);
 	uhci_delay_ms(sc, 2); /* Hardware finishes in 1ms */
 #ifdef USB_USE_SOFTINTR
 	sc->sc_softwake = 1;
 #endif /* USB_USE_SOFTINTR */
 	UHCI_UNLOCK(sc);
+	USB_PIPE_LOCK(xfer->pipe);
 	usb_schedsoftintr(&sc->sc_bus);
 #ifdef USB_USE_SOFTINTR
 	DPRINTFN(1,("uhci_abort_xfer: tsleep\n"));
