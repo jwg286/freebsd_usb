@@ -89,6 +89,8 @@ SYSCTL_INT(_hw_usb_ugen, OID_AUTO, debug, CTLFLAG_RW,
 #define UGEN_NISOREQS	6	/* number of outstanding xfer requests */
 #define UGEN_NISORFRMS	4	/* number of frames (miliseconds) per req */
 
+#define	UGEN_QSIZE	512
+
 struct ugen_endpoint {
 	struct ugen_softc *sc;
 	struct cdev *dev;
@@ -98,7 +100,9 @@ struct ugen_endpoint {
 #define	UGEN_ASLP	0x02	/* waiting for data */
 #define UGEN_SHORT_OK	0x04	/* short xfers are OK */
 	usbd_pipe_handle pipeh;
-	struct clist q;
+	char q[UGEN_QSIZE];
+	unsigned int q_start;
+	unsigned int q_length;
 	struct selinfo rsel;
 	u_char *ibuf;		/* start of buffer (circular for isoc) */
 	u_char *fill;		/* location for input (isoc) */
@@ -115,6 +119,7 @@ struct ugen_endpoint {
 
 struct ugen_softc {
 	device_t sc_dev;		/* base device */
+	struct mtx sc_mtx;
 	usbd_device_handle sc_udev;
 	struct cdev *dev;
 
@@ -134,6 +139,14 @@ struct ugen_softc {
 	/* handled by dev layer */
 	u_char sc_dying;
 };
+
+#define	UGEN_LOCK_INIT(_sc) \
+	mtx_init(&(_sc)->sc_mtx, device_get_nameunit((_sc)->sc_dev), \
+	    NULL, MTX_DEF)
+#define	UGEN_LOCK_DESTROY(_sc)		mtx_destroy(&(_sc)->sc_mtx)
+#define	UGEN_LOCK(_sc)			mtx_lock(&(_sc)->sc_mtx)
+#define	UGEN_UNLOCK(_sc)		mtx_unlock(&(_sc)->sc_mtx)
+#define	UGEN_LOCK_ASSERT(_sc)		mtx_assert(&(_sc)->sc_mtx, MA_OWNED)
 
 d_open_t  ugenopen;
 d_close_t ugenclose;
@@ -181,9 +194,12 @@ static usb_config_descriptor_t *ugen_get_cdesc(struct ugen_softc *sc,
 					       int index, int *lenp);
 static usbd_status ugen_set_interface(struct ugen_softc *, int, int);
 static int ugen_get_alt_index(struct ugen_softc *sc, int ifaceidx);
+static void ugen_q_to_b(struct ugen_endpoint *, char *, u_int32_t);
+static void ugen_b_to_q(const char *, u_int32_t, struct ugen_endpoint *);
 
-#define UGENUNIT(n) ((minor(n) >> 4) & 0xf)
-#define UGENENDPOINT(n) (minor(n) & 0xf)
+#define	UGENDEVUNIT(n) (dev2unit(n) & 0xff)
+#define	UGENUNIT(n) ((UGENDEVUNIT(n) >> 4) & 0xf)
+#define	UGENENDPOINT(n) (UGENDEVUNIT(n) & 0xf)
 #define UGENMINOR(u, e) (((u) << 4) | (e))
 
 static device_probe_t ugen_match;
@@ -233,6 +249,7 @@ ugen_attach(device_t self)
 	int conf;
 
 	sc->sc_dev = self;
+	UGEN_LOCK_INIT(sc);
 	sc->sc_udev = udev = uaa->device;
 
 	memset(sc->sc_endpoints, 0, sizeof sc->sc_endpoints);
@@ -529,9 +546,7 @@ ugenopen(struct cdev *dev, int flag, int mode, struct thread *p)
 			sce->ibuf = malloc(isize, M_USBDEV, M_WAITOK);
 			DPRINTFN(5, ("ugenopen: intr endpt=%d,isize=%d\n",
 				     endpt, isize));
-			if ((clist_alloc_cblocks(&sce->q, UGEN_IBSIZE,
-			    UGEN_IBSIZE), 0) == -1)
-				return (ENOMEM);
+			sce->q_length = 0;
 			err = usbd_open_pipe_intr(sce->iface,
 				  edesc->bEndpointAddress,
 				  USBD_SHORT_XFER_OK, &sce->pipeh, sce,
@@ -539,7 +554,6 @@ ugenopen(struct cdev *dev, int flag, int mode, struct thread *p)
 				  USBD_DEFAULT_INTERVAL);
 			if (err) {
 				free(sce->ibuf, M_USBDEV);
-				clist_free_cblocks(&sce->q);
 				return (EIO);
 			}
 			DPRINTFN(5, ("ugenopen: interrupt open done\n"));
@@ -649,8 +663,7 @@ ugenclose(struct cdev *dev, int flag, int mode, struct thread *p)
 
 		switch (sce->edesc->bmAttributes & UE_XFERTYPE) {
 		case UE_INTERRUPT:
-			ndflush(&sce->q, sce->q.c_cc);
-			clist_free_cblocks(&sce->q);
+			sce->q_length = 0;
 			break;
 		case UE_ISOCHRONOUS:
 			for (i = 0; i < UGEN_NISOREQS; ++i)
@@ -663,7 +676,7 @@ ugenclose(struct cdev *dev, int flag, int mode, struct thread *p)
 		if (sce->ibuf != NULL) {
 			free(sce->ibuf, M_USBDEV);
 			sce->ibuf = NULL;
-			clist_free_cblocks(&sce->q);
+			sce->q_length = 0;	/* XXX why here? */
 		}
 	}
 	sc->sc_is_open[endpt] = 0;
@@ -707,7 +720,7 @@ ugen_do_read(struct ugen_softc *sc, int endpt, struct uio *uio, int flag)
 	case UE_INTERRUPT:
 		/* Block until activity occurred. */
 		s = splusb();
-		while (sce->q.c_cc == 0) {
+		while (sce->q_length == 0) {
 			if (flag & O_NONBLOCK) {
 				splx(s);
 				return (EWOULDBLOCK);
@@ -730,13 +743,13 @@ ugen_do_read(struct ugen_softc *sc, int endpt, struct uio *uio, int flag)
 		splx(s);
 
 		/* Transfer as many chunks as possible. */
-		while (sce->q.c_cc > 0 && uio->uio_resid > 0 && !error) {
-			n = min(sce->q.c_cc, uio->uio_resid);
+		while (sce->q_length > 0 && uio->uio_resid > 0 && !error) {
+			n = min(sce->q_length, uio->uio_resid);
 			if (n > sizeof(buffer))
 				n = sizeof(buffer);
 
 			/* Remove a small chunk from the input queue. */
-			q_to_b(&sce->q, buffer, n);
+			ugen_q_to_b(sce, buffer, n);
 			DPRINTFN(5, ("ugenread: got %d chars\n", n));
 
 			/* Copy the data to the user process. */
@@ -1027,7 +1040,7 @@ ugenintr(usbd_xfer_handle xfer, usbd_private_handle addr, usbd_status status)
 	DPRINTFN(5, ("          data = %02x %02x %02x\n",
 		     ibuf[0], ibuf[1], ibuf[2]));
 
-	(void)b_to_q(ibuf, count, &sce->q);
+	ugen_b_to_q(ibuf, count, sce);
 
 	if (sce->state & UGEN_ASLP) {
 		sce->state &= ~UGEN_ASLP;
@@ -1545,13 +1558,13 @@ ugenpoll(struct cdev *dev, int events, struct thread *p)
 	switch (edesc->bmAttributes & UE_XFERTYPE) {
 	case UE_INTERRUPT:
 		if (sce_in != NULL && (events & (POLLIN | POLLRDNORM))) {
-			if (sce_in->q.c_cc > 0)
+			if (sce_in->q_length > 0)
 				revents |= events & (POLLIN | POLLRDNORM);
 			else
 				selrecord(p, &sce_in->rsel);
 		}
 		if (sce_out != NULL && (events & (POLLOUT | POLLWRNORM))) {
-			if (sce_out->q.c_cc > 0)
+			if (sce_out->q_length > 0)
 				revents |= events & (POLLOUT | POLLWRNORM);
 			else
 				selrecord(p, &sce_out->rsel);
@@ -1585,6 +1598,52 @@ ugenpoll(struct cdev *dev, int events, struct thread *p)
 	}
 	splx(s);
 	return (revents);
+}
+
+
+static void
+ugen_putc(struct ugen_endpoint *sce, char c)
+{
+	unsigned int p;
+
+	if (sce->q_length == UGEN_QSIZE)
+		return;
+
+	p = (sce->q_start + sce->q_length) % UGEN_QSIZE;
+	sce->q[p] = c;
+	sce->q_length++;
+}
+
+static char
+ugen_getc(struct ugen_endpoint *sce)
+{
+	char c;
+
+	if (sce->q_length == 0)
+		return (-1);
+
+	c = sce->q[sce->q_start];
+	sce->q_start = (sce->q_start + 1) % UGEN_QSIZE;
+	sce->q_length--;
+	return (c);
+}
+
+static void
+ugen_q_to_b(struct ugen_endpoint *sce, char *buffer, u_int32_t n)
+{
+	u_int32_t i;
+
+	for (i = 0; i < n; i++)
+		buffer[i] = ugen_getc(sce);
+}
+
+static void
+ugen_b_to_q(const char *buffer, u_int32_t n, struct ugen_endpoint *sce)
+{
+	u_int32_t i;
+
+	for (i = 0; i < n; i++)
+		ugen_putc(sce, buffer[i]);
 }
 
 DRIVER_MODULE(ugen, uhub, ugen_driver, ugen_devclass, usbd_driver_load, 0);
