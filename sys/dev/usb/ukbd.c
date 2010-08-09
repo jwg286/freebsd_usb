@@ -645,6 +645,8 @@ ukbd_enable_intr(keyboard_t *kbd, int on, usbd_intr_t *func)
 	ukbd_state_t *state = (ukbd_state_t *)kbd->kb_data;
 	usbd_status err;
 
+	UKBD_LOCK_ASSERT(sc);
+
 	if (on) {
 		/* Set up interrupt pipe. */
 		if (state->ks_ifstate & INTRENABLED)
