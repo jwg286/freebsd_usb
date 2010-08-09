@@ -1945,7 +1945,10 @@ uhci_device_bulk_transfer(usbd_xfer_handle xfer)
 	 * Pipe isn't running (otherwise err would be USBD_INPROG),
 	 * so start it first.
 	 */
-	return (uhci_device_bulk_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = uhci_device_bulk_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 usbd_status
@@ -2060,7 +2063,6 @@ uhci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 	struct uhci_pipe *upipe = (struct uhci_pipe *)xfer->pipe;
 	uhci_softc_t *sc = (uhci_softc_t *)upipe->pipe.device->bus;
 	uhci_soft_td_t *std;
-	int s;
 
 	DPRINTFN(1,("uhci_abort_xfer: xfer=%p, status=%d\n", xfer, status));
 
@@ -2068,12 +2070,10 @@ uhci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 
 	if (sc->sc_dying) {
 		/* If we're dying, just do the software part. */
-		s = splusb();
 		xfer->status = status;	/* make software ignore it */
 		callout_stop(&xfer->timeout_handle);
 		usb_rem_task(xfer->pipe->device, &UXFER(xfer)->abort_task);
 		uhci_transfer_complete(xfer);
-		splx(s);
 		return;
 	}
 
@@ -2101,7 +2101,6 @@ uhci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 	/*
 	 * Step 1: Make interrupt routine and hardware ignore xfer.
 	 */
-	s = splusb();
 	uxfer->uhci_xfer_flags |= UHCI_XFER_ABORTING;
 	xfer->status = status;	/* make software ignore it */
 	callout_stop(&xfer->timeout_handle);
@@ -2109,30 +2108,28 @@ uhci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 	DPRINTFN(1,("uhci_abort_xfer: stop ii=%p\n", ii));
 	for (std = ii->stdstart; std != NULL; std = std->link.std)
 		std->td.td_status &= htole32(~(UHCI_TD_ACTIVE | UHCI_TD_IOC));
-	splx(s);
 
 	/*
 	 * Step 2: Wait until we know hardware has finished any possible
 	 * use of the xfer.  Also make sure the soft interrupt routine
 	 * has run.
 	 */
+	UHCI_LOCK(sc);
 	uhci_delay_ms(sc, 2); /* Hardware finishes in 1ms */
-	s = splusb();
 #ifdef USB_USE_SOFTINTR
 	sc->sc_softwake = 1;
 #endif /* USB_USE_SOFTINTR */
+	UHCI_UNLOCK(sc);
 	usb_schedsoftintr(&sc->sc_bus);
 #ifdef USB_USE_SOFTINTR
 	DPRINTFN(1,("uhci_abort_xfer: tsleep\n"));
 	tsleep(&sc->sc_softwake, PZERO, "uhciab", 0);
 #endif /* USB_USE_SOFTINTR */
-	splx(s);
 
 	/*
 	 * Step 3: Execute callback.
 	 */
 	DPRINTFN(1,("uhci_abort_xfer: callback\n"));
-	s = splusb();
 #ifdef DIAGNOSTIC
 	ii->isdone = 1;
 #endif
@@ -2143,7 +2140,6 @@ uhci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 		wakeup(&uxfer->uhci_xfer_flags);
 	}
 	uhci_transfer_complete(xfer);
-	splx(s);
 }
 
 /*
@@ -2214,7 +2210,10 @@ uhci_device_ctrl_transfer(usbd_xfer_handle xfer)
 	 * Pipe isn't running (otherwise err would be USBD_INPROG),
 	 * so start it first.
 	 */
-	return (uhci_device_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = uhci_device_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 usbd_status
@@ -2256,7 +2255,10 @@ uhci_device_intr_transfer(usbd_xfer_handle xfer)
 	 * Pipe isn't running (otherwise err would be USBD_INPROG),
 	 * so start it first.
 	 */
-	return (uhci_device_intr_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = uhci_device_intr_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 usbd_status
@@ -2544,8 +2546,11 @@ uhci_device_isoc_transfer(usbd_xfer_handle xfer)
 	uhci_device_isoc_enter(xfer);
 
 	/* and start if the pipe wasn't running */
-	if (!err)
+	if (!err) {
+		USB_PIPE_LOCK(xfer->pipe);
 		uhci_device_isoc_start(STAILQ_FIRST(&xfer->pipe->queue));
+		USB_PIPE_UNLOCK(xfer->pipe);
+	}
 
 	return (err);
 }
@@ -3397,7 +3402,10 @@ uhci_root_ctrl_transfer(usbd_xfer_handle xfer)
 	 * Pipe isn't running (otherwise err would be USBD_INPROG),
 	 * so start it first.
 	 */
-	return (uhci_root_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = uhci_root_ctrl_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 usbd_status
@@ -3692,9 +3700,15 @@ uhci_root_ctrl_start(usbd_xfer_handle xfer)
 			UWRITE2(sc, port, x | UHCI_PORTSC_SUSP);
 			break;
 		case UHF_PORT_RESET:
+			/*
+			 * unlock the pipe lock because it could sleep in
+			 * uhci_portreset().
+			 */
+			USB_PIPE_UNLOCK(xfer->pipe);
 			UHCI_LOCK(sc);
 			err = uhci_portreset(sc, index);
 			UHCI_UNLOCK(sc);
+			USB_PIPE_LOCK(xfer->pipe);
 			goto ret;
 		case UHF_PORT_POWER:
 			/* Pretend we turned on power */
@@ -3721,9 +3735,7 @@ uhci_root_ctrl_start(usbd_xfer_handle xfer)
 	err = USBD_NORMAL_COMPLETION;
  ret:
 	xfer->status = err;
-	USB_PIPE_LOCK(xfer->pipe);
 	uhci_transfer_complete(xfer);
-	USB_PIPE_UNLOCK(xfer->pipe);
 	return (USBD_IN_PROGRESS);
 }
 
@@ -3778,7 +3790,10 @@ uhci_root_intr_transfer(usbd_xfer_handle xfer)
 	 * Pipe isn't running (otherwise err would be USBD_INPROG),
 	 * so start it first.
 	 */
-	return (uhci_root_intr_start(STAILQ_FIRST(&xfer->pipe->queue)));
+	USB_PIPE_LOCK(xfer->pipe);
+	err = uhci_root_intr_start(STAILQ_FIRST(&xfer->pipe->queue));
+	USB_PIPE_UNLOCK(xfer->pipe);
+	return (err);
 }
 
 /* Start a transfer on the root interrupt pipe */
