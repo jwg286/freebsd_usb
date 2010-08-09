@@ -1236,8 +1236,6 @@ struct zyd_vap {
 	struct ieee80211vap	vap;
 	int			(*newstate)(struct ieee80211vap *,
 				    enum ieee80211_state, int);
-	struct callout		amrr_ch;
-	struct ieee80211_amrr	amrr;
 };
 #define	ZYD_VAP(vap)	((struct zyd_vap *)(vap))
 
