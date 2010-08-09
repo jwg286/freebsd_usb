@@ -2382,16 +2382,15 @@ uhci_device_intr_close(usbd_pipe_handle pipe)
 
 	/* Unlink descriptors from controller data structures. */
 	npoll = upipe->u.intr.npoll;
-	s = splusb();
+	UHCI_LOCK(sc);
 	for (i = 0; i < npoll; i++)
 		uhci_remove_intr(sc, upipe->u.intr.qhs[i]);
-	splx(s);
-
 	/*
 	 * We now have to wait for any activity on the physical
 	 * descriptors to stop.
 	 */
 	uhci_delay_ms(sc, 2);
+	UHCI_UNLOCK(sc);
 
 	for(i = 0; i < npoll; i++)
 		uhci_free_sqh(sc, upipe->u.intr.qhs[i]);
