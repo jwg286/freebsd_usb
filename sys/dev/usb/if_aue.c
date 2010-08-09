@@ -34,7 +34,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: stable/7/sys/dev/usb/if_aue.c 179044 2008-05-16 10:11:15Z kris $");
+__FBSDID("$FreeBSD: head/sys/dev/usb/if_aue.c 184882 2008-11-12 13:58:59Z keramida $");
 
 /*
  * ADMtek AN986 Pegasus and AN8511 Pegasus II USB to ethernet driver.
@@ -628,6 +628,15 @@ aue_match(device_t self)
 	struct usb_attach_arg *uaa = device_get_ivars(self);
 
 	if (uaa->iface != NULL)
+		return (UMATCH_NONE);
+
+	/*
+	 * Belkin USB Bluetooth dongles of the F8T012xx1 model series conflict
+	 * with older Belkin USB2LAN adapters.  Skip if_aue if we detect one of
+	 * the devices that look like Bluetooth adapters.
+	 */
+	if (uaa->vendor == USB_VENDOR_BELKIN &&
+	    uaa->product == USB_PRODUCT_BELKIN_F8T012 && uaa->release == 0x0413)
 		return (UMATCH_NONE);
 
 	return (aue_lookup(uaa->vendor, uaa->product) != NULL ?

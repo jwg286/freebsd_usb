@@ -32,7 +32,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: stable/7/sys/dev/usb/if_auereg.h 165902 2007-01-08 23:24:21Z alfred $
+ * $FreeBSD: head/sys/dev/usb/if_auereg.h 165902 2007-01-08 23:24:21Z alfred $
  */
 
 /*

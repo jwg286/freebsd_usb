@@ -1,6 +1,6 @@
 /*	$NetBSD: if_udavreg.h,v 1.2 2003/09/04 15:17:39 tsutsui Exp $	*/
 /*	$nabe: if_udavreg.h,v 1.2 2003/08/21 16:26:40 nabe Exp $	*/
-/*	$FreeBSD: stable/7/sys/dev/usb/if_udavreg.h 162097 2006-09-07 00:06:42Z imp $	*/
+/*	$FreeBSD: head/sys/dev/usb/if_udavreg.h 162097 2006-09-07 00:06:42Z imp $	*/
 /*-
  * Copyright (c) 2003
  *     Shingo WATANABE <nabe@nabechan.org>.  All rights reserved.

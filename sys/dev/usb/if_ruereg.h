@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: stable/7/sys/dev/usb/if_ruereg.h 171331 2007-07-09 20:56:39Z imp $
+ * $FreeBSD: head/sys/dev/usb/if_ruereg.h 171331 2007-07-09 20:56:39Z imp $
  */
 
 #ifndef _IF_RUEREG_H_

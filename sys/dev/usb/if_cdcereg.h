@@ -29,7 +29,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: stable/7/sys/dev/usb/if_cdcereg.h 170497 2007-06-10 07:33:48Z imp $
+ * $FreeBSD: head/sys/dev/usb/if_cdcereg.h 170497 2007-06-10 07:33:48Z imp $
  */
 
 #ifndef _USB_IF_CDCEREG_H_

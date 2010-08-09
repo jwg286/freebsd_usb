@@ -1,6 +1,6 @@
 /*	$NetBSD: if_udav.c,v 1.2 2003/09/04 15:17:38 tsutsui Exp $	*/
 /*	$nabe: if_udav.c,v 1.3 2003/08/21 16:57:19 nabe Exp $	*/
-/*	$FreeBSD: stable/7/sys/dev/usb/if_udav.c 171564 2007-07-24 14:44:23Z imp $	*/
+/*	$FreeBSD: head/sys/dev/usb/if_udav.c 178577 2008-04-26 05:46:28Z imp $	*/
 /*-
  * Copyright (c) 2003
  *     Shingo WATANABE <nabe@nabechan.org>.  All rights reserved.
@@ -45,7 +45,7 @@
  */
 
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: stable/7/sys/dev/usb/if_udav.c 171564 2007-07-24 14:44:23Z imp $");
+__FBSDID("$FreeBSD: head/sys/dev/usb/if_udav.c 178577 2008-04-26 05:46:28Z imp $");
 
 #include "opt_inet.h"
 #if defined(__NetBSD__)
@@ -260,11 +260,8 @@ static const struct udav_type {
 	{{ USB_VENDOR_COREGA, USB_PRODUCT_COREGA_FETHER_USB_TXC }, 0},
 	/* ShanTou ST268 USB NIC */
 	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ST268 }, 0},
-#if 0
-	/* DAVICOM DM9601 Generic? */
-	/*  XXX: The following ids was obtained from the data sheet. */
-	{{ 0x0a46, 0x9601 }, 0},
-#endif
+	/* ShanTou DM9601 USB NIC */
+	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_DM9601}, 0},
 };
 #define udav_lookup(v, p) ((const struct udav_type *)usb_lookup(udav_devs, v, p))
 
@@ -1777,11 +1774,7 @@ udav_lock_mii(struct udav_softc *sc)
 			__func__));
 
 	sc->sc_refcnt++;
-#if defined(__NetBSD__)
 	lockmgr(&sc->sc_mii_lock, LK_EXCLUSIVE, NULL);
-#elif defined(__FreeBSD__)
-	lockmgr(&sc->sc_mii_lock, LK_EXCLUSIVE, NULL, NULL);
-#endif
 }
 
 static void
@@ -1790,11 +1783,7 @@ udav_unlock_mii(struct udav_softc *sc)
 	DPRINTFN(0xff, ("%s: %s: enter\n", device_get_nameunit(sc->sc_dev),
 		       __func__));
 
-#if defined(__NetBSD__)
 	lockmgr(&sc->sc_mii_lock, LK_RELEASE, NULL);
-#elif defined(__FreeBSD__)
-	lockmgr(&sc->sc_mii_lock, LK_RELEASE, NULL, NULL);
-#endif
 	if (--sc->sc_refcnt < 0)
 		usb_detach_wakeup(sc->sc_dev);
 }

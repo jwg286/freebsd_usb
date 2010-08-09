@@ -29,7 +29,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: stable/7/sys/dev/usb/if_kuereg.h 170541 2007-06-11 05:50:47Z imp $
+ * $FreeBSD: head/sys/dev/usb/if_kuereg.h 170541 2007-06-11 05:50:47Z imp $
  */
 
 /*

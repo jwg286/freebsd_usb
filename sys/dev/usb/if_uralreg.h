@@ -1,4 +1,4 @@
-/*	$FreeBSD: stable/7/sys/dev/usb/if_uralreg.h 170530 2007-06-11 03:36:55Z sam $	*/
+/*	$FreeBSD: head/sys/dev/usb/if_uralreg.h 170530 2007-06-11 03:36:55Z sam $	*/
 
 /*-
  * Copyright (c) 2005, 2006
