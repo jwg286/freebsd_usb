@@ -982,13 +982,29 @@ usb_transfer_complete(usbd_xfer_handle xfer)
 	 * the xfer.
 	 */
 	if (repeat) {
-		if (xfer->callback)
+		if (xfer->callback) {
+			/*
+			 * Don't call the driver's callback with holding the
+			 * pipe lock because the driver could hold their own
+			 * lock.  It could cause LOR.
+			 */
+			USB_PIPE_UNLOCK(pipe);
 			xfer->callback(xfer, xfer->priv, xfer->status);
+			USB_PIPE_LOCK(pipe);
+		}
 		pipe->methods->done(xfer);
 	} else {
 		pipe->methods->done(xfer);
-		if (xfer->callback)
+		if (xfer->callback) {
+			/*
+			 * Don't call the driver's callback with holding the
+			 * pipe lock because the driver could hold their own
+			 * lock.  It could cause LOR.
+			 */
+			USB_PIPE_UNLOCK(pipe);
 			xfer->callback(xfer, xfer->priv, xfer->status);
+			USB_PIPE_LOCK(pipe);
+		}
 	}
 
 	if (sync && !polling)
