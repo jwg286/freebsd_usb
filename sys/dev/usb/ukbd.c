@@ -666,9 +666,15 @@ ukbd_enable_intr(keyboard_t *kbd, int on, usbd_intr_t *func)
 		if (err)
 			return (EIO);
 	} else {
+		/*
+		 * Unlocking the ukbd(4) lock is nesessary because the thread
+		 * could sleep in usbd_abort_pipe().
+		 */
+		UKBD_UNLOCK(sc);
 		/* Disable interrupts. */
 		usbd_abort_pipe(state->ks_intrpipe);
 		usbd_close_pipe(state->ks_intrpipe);
+		UKBD_LOCK(sc);
 
 		state->ks_ifstate &= ~INTRENABLED;
 	}
