@@ -1427,6 +1427,10 @@ ukbd_poll(keyboard_t *kbd, int on)
 		UKBD_LOCK(sc);
 		++state->ks_polling;
 		if (state->ks_polling == 1) {
+			/*
+			 * to avoid LOR we release the lock here and it looks
+			 * it don't need to call it with lock holding.
+			 */
 			UKBD_UNLOCK(sc);
 			usbd_set_polling(dev, on);
 			UKBD_LOCK(sc);
