@@ -536,7 +536,7 @@ ukbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 	keymap_t *keymap;
 	accentmap_t *accmap;
 	fkeytab_t *fkeymap;
-	int fkeymap_size;
+	int fkeymap_size, ret;
 	void **data = (void **)arg;
 	device_t self = (device_t)data[0];
 	struct ukbd_softc *sc = device_get_softc(self);
@@ -631,7 +631,10 @@ ukbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 			/* XXX: Missing free()'s */
 			return ENXIO;
 		}
-		if (ukbd_enable_intr(kbd, TRUE, (usbd_intr_t *)data[1]) == 0)
+		UKBD_LOCK(sc);
+		ret = ukbd_enable_intr(kbd, TRUE, (usbd_intr_t *)data[1]);
+		UKBD_UNLOCK(sc);
+		if (ret == 0)
 			ukbd_timeout((void *)kbd);
 		KBD_CONFIG_DONE(kbd);
 	}
@@ -643,6 +646,7 @@ static int
 ukbd_enable_intr(keyboard_t *kbd, int on, usbd_intr_t *func)
 {
 	ukbd_state_t *state = (ukbd_state_t *)kbd->kb_data;
+	struct ukbd_softc *sc = state->ks_softc;
 	usbd_status err;
 
 	UKBD_LOCK_ASSERT(sc);
