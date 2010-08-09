@@ -2263,7 +2263,7 @@ uhci_device_intr_start(usbd_xfer_handle xfer)
 	uhci_soft_qh_t *sqh;
 	usbd_status err;
 	int isread, endpt;
-	int i, s;
+	int i;
 
 	if (sc->sc_dying)
 		return (USBD_IOERROR);
@@ -2296,7 +2296,7 @@ uhci_device_intr_start(usbd_xfer_handle xfer)
 	}
 #endif
 
-	s = splusb();
+	UHCI_LOCK(sc);
 	/* Set up interrupt info. */
 	ii->xfer = xfer;
 	ii->stdstart = data;
@@ -2317,7 +2317,7 @@ uhci_device_intr_start(usbd_xfer_handle xfer)
 	}
 	uhci_add_intr_info(sc, ii);
 	xfer->status = USBD_IN_PROGRESS;
-	splx(s);
+	UHCI_UNLOCK(sc);
 
 #ifdef USB_DEBUG
 	if (uhcidebug > 10) {
@@ -3017,7 +3017,7 @@ uhci_device_bulk_done(usbd_xfer_handle xfer)
 	DPRINTFN(5, ("uhci_device_bulk_done: length=%d\n", xfer->actlen));
 }
 
-/* Add interrupt QH, called with vflock. */
+/* Add interrupt QH. */
 void
 uhci_add_intr(uhci_softc_t *sc, uhci_soft_qh_t *sqh)
 {
@@ -3063,7 +3063,7 @@ usbd_status
 uhci_device_setintr(uhci_softc_t *sc, struct uhci_pipe *upipe, int ival)
 {
 	uhci_soft_qh_t *sqh;
-	int i, npoll, s;
+	int i, npoll;
 	u_int bestbw, bw, bestoffs, offs;
 
 	DPRINTFN(2, ("uhci_device_setintr: pipe=%p\n", upipe));
@@ -3104,11 +3104,11 @@ uhci_device_setintr(uhci_softc_t *sc, struct uhci_pipe *upipe, int ival)
 	}
 #undef MOD
 
-	s = splusb();
+	UHCI_LOCK(sc);
 	/* Enter QHs into the controller data structures. */
 	for(i = 0; i < npoll; i++)
 		uhci_add_intr(sc, upipe->u.intr.qhs[i]);
-	splx(s);
+	UHCI_UNLOCK(sc);
 
 	DPRINTFN(5, ("uhci_device_setintr: returns %p\n", upipe));
 	return (USBD_NORMAL_COMPLETION);
