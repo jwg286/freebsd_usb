@@ -1534,9 +1534,9 @@ uhci_timeout_task(void *addr)
 
 	DPRINTF(("uhci_timeout_task: xfer=%p\n", xfer));
 
-	s = splusb();
+	USB_PIPE_LOCK(xfer->pipe);
 	uhci_abort_xfer(xfer, USBD_TIMEOUT);
-	splx(s);
+	USB_PIPE_UNLOCK(xfer->pipe);
 }
 
 /*
