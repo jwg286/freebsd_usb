@@ -237,6 +237,7 @@ static void		ehci_dump_exfer(struct ehci_xfer *);
 #endif
 #endif
 static void		ehci_delay_ms(struct ehci_softc *, u_int);
+static void		ehci_delay_ms_locked(struct ehci_softc *, u_int);
 
 
 #define EHCI_NULL htole32(EHCI_LINK_TERMINATE)
@@ -2043,10 +2044,8 @@ ehci_root_ctrl_start(usbd_xfer_handle xfer)
 			EOWRITE4(sc, port, v | EHCI_PS_PR);
 			/* Unholding the pipe lock due to sleep */
 			USB_PIPE_UNLOCK(xfer->pipe);
-			EHCI_LOCK(sc);
 			/* Wait for reset to complete. */
 			ehci_delay_ms(sc, USB_PORT_ROOT_RESET_DELAY);
-			EHCI_UNLOCK(sc);
 			USB_PIPE_LOCK(xfer->pipe);
 			if (sc->sc_dying) {
 				err = USBD_IOERROR;
@@ -2056,10 +2055,8 @@ ehci_root_ctrl_start(usbd_xfer_handle xfer)
 			EOWRITE4(sc, port, v);
 			/* Unholding the pipe lock due to sleep */
 			USB_PIPE_UNLOCK(xfer->pipe);
-			EHCI_LOCK(sc);
 			/* Wait for HC to complete reset. */
 			ehci_delay_ms(sc, EHCI_PORT_RESET_COMPLETE);
-			EHCI_UNLOCK(sc);
 			USB_PIPE_LOCK(xfer->pipe);
 			if (sc->sc_dying) {
 				err = USBD_IOERROR;
@@ -3459,9 +3456,11 @@ ehci_device_intr_done(usbd_xfer_handle xfer)
 }
 
 static void
-ehci_delay_ms(struct ehci_softc *sc, u_int ms)
+ehci_delay_ms_locked(struct ehci_softc *sc, u_int ms)
 {
 	usbd_bus_handle bus = &sc->sc_bus;
+
+	EHCI_LOCK_ASSERT(sc);
 
 	/* Wait at least two clock ticks so we know the time has passed. */
 	if (bus->use_polling || cold)
@@ -3469,6 +3468,15 @@ ehci_delay_ms(struct ehci_softc *sc, u_int ms)
 	else
 		msleep(bus, &bus->mtx, PRIBIO, "ehcidly",
 		    (ms * hz + 999) / 1000 + 1);
+}
+
+static void
+ehci_delay_ms(struct ehci_softc *sc, u_int ms)
+{
+
+	EHCI_LOCK(sc);
+	ehci_delay_ms_locked(sc, ms);
+	EHCI_UNLOCK(sc);
 }
 
 /************************/
