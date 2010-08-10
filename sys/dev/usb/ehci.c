@@ -3073,7 +3073,6 @@ ehci_device_bulk_start(usbd_xfer_handle xfer)
 	ehci_soft_qh_t *sqh;
 	usbd_status err;
 	int len, isread, endpt;
-	int s;
 
 	DPRINTFN(2, ("ehci_device_bulk_start: xfer=%p len=%d flags=%d\n",
 		     xfer, xfer->length, xfer->flags));
