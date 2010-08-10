@@ -3138,7 +3138,7 @@ ehci_device_bulk_start(usbd_xfer_handle xfer)
 	exfer->isdone = 0;
 #endif
 
-	s = splusb();
+	EHCI_LOCK(sc);
 	ehci_activate_qh(sqh, data);
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
 		callout_reset(&xfer->timeout_handle, MS_TO_TICKS(xfer->timeout),
@@ -3146,7 +3146,7 @@ ehci_device_bulk_start(usbd_xfer_handle xfer)
 	}
 	ehci_add_intr_list(sc, exfer);
 	xfer->status = USBD_IN_PROGRESS;
-	splx(s);
+	EHCI_UNLOCK(sc);
 
 #ifdef EHCI_DEBUG
 	if (ehcidebug > 10) {
