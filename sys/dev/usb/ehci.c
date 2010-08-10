@@ -1531,13 +1531,13 @@ void
 ehci_rem_qh(ehci_softc_t *sc, ehci_soft_qh_t *sqh, ehci_soft_qh_t *head)
 {
 
-	EHCI_LOCK_ASSERT(sc);
-
+	EHCI_LOCK(sc);
 	/* XXX */
 	sqh->prev->qh.qh_link = sqh->qh.qh_link;
 	sqh->prev->next = sqh->next;
 	if (sqh->next)
 		sqh->next->prev = sqh->prev;
+	EHCI_UNLOCK(sc);
 	ehci_sync_hc(sc);
 }
 
@@ -1584,7 +1584,7 @@ ehci_activate_qh(ehci_soft_qh_t *sqh, ehci_soft_qtd_t *sqtd)
 void
 ehci_sync_hc(ehci_softc_t *sc)
 {
-	int s, error;
+	int error;
 
 	if (sc->sc_dying) {
 		DPRINTFN(2,("ehci_sync_hc: dying\n"));
@@ -1593,15 +1593,17 @@ ehci_sync_hc(ehci_softc_t *sc)
 	DPRINTFN(2,("ehci_sync_hc: enter\n"));
 	/* get doorbell */
 	lockmgr(&sc->sc_doorbell_lock, LK_EXCLUSIVE, NULL);
-	s = splhardusb();
+	EHCI_LOCK(sc);
 	/* ask for doorbell */
 	EOWRITE4(sc, EHCI_USBCMD, EOREAD4(sc, EHCI_USBCMD) | EHCI_CMD_IAAD);
 	DPRINTFN(1,("ehci_sync_hc: cmd=0x%08x sts=0x%08x\n",
 		    EOREAD4(sc, EHCI_USBCMD), EOREAD4(sc, EHCI_USBSTS)));
-	error = tsleep(&sc->sc_async_head, PZERO, "ehcidi", hz); /* bell wait */
+	/* bell wait */
+	error = msleep(&sc->sc_async_head, &sc->sc_bus.mtx, PZERO,
+	    "ehcidi", hz);
 	DPRINTFN(1,("ehci_sync_hc: cmd=0x%08x sts=0x%08x\n",
 		    EOREAD4(sc, EHCI_USBCMD), EOREAD4(sc, EHCI_USBSTS)));
-	splx(s);
+	EHCI_UNLOCK(sc);
 	/* release doorbell */
 	lockmgr(&sc->sc_doorbell_lock, LK_RELEASE, NULL);
 #ifdef DIAGNOSTIC
@@ -2555,9 +2557,7 @@ ehci_close_pipe(usbd_pipe_handle pipe, ehci_soft_qh_t *head)
 	ehci_softc_t *sc = (ehci_softc_t *)pipe->device->bus;
 	ehci_soft_qh_t *sqh = epipe->sqh;
 
-	EHCI_LOCK(sc);
 	ehci_rem_qh(sc, sqh, head);
-	EHCI_UNLOCK(sc);
 	pipe->endpoint->savedtoggle =
 	    EHCI_QTD_GET_TOGGLE(le32toh(sqh->qh.qh_qtd.qtd_status));
 	ehci_free_sqh(sc, epipe->sqh);
@@ -3231,7 +3231,9 @@ ehci_device_setintr(ehci_softc_t *sc, ehci_soft_qh_t *sqh, int ival)
 
 	sqh->islot = islot;
 	isp = &sc->sc_islots[islot];
+	EHCI_LOCK(sc);
 	ehci_add_qh(sc, sqh, isp->sqh);
+	EHCI_UNLOCK(sc);
 
 	return (USBD_NORMAL_COMPLETION);
 }
