@@ -203,7 +203,6 @@ static int	zyd_alloc_rx_list(struct zyd_softc *);
 static void	zyd_free_rx_list(struct zyd_softc *);
 static struct ieee80211_node *zyd_node_alloc(struct ieee80211vap *,
 			    const uint8_t mac[IEEE80211_ADDR_LEN]);
-static void	zyd_task(void *);
 static int	zyd_newstate(struct ieee80211vap *, enum ieee80211_state, int);
 static int	zyd_cmd(struct zyd_softc *, uint16_t, const void *, int,
 		    void *, int, u_int);
@@ -224,7 +223,6 @@ static int	zyd_set_macaddr(struct zyd_softc *, const uint8_t *);
 static int	zyd_set_bssid(struct zyd_softc *, const uint8_t *);
 static int	zyd_switch_radio(struct zyd_softc *, int);
 static int	zyd_set_led(struct zyd_softc *, int, int);
-static void	zyd_set_multi(void *);
 static void	zyd_update_mcast(struct ifnet *);
 static int	zyd_set_rxfilter(struct zyd_softc *);
 static void	zyd_set_chan(struct zyd_softc *, struct ieee80211_channel *);
@@ -246,7 +244,6 @@ static void	zyd_init_locked(struct zyd_softc *);
 static void	zyd_init(void *);
 static void	zyd_stop(struct zyd_softc *, int);
 static int	zyd_loadfirmware(struct zyd_softc *);
-static void	zyd_scantask(void *);
 static void	zyd_scan_start(struct ieee80211com *);
 static void	zyd_scan_end(struct ieee80211com *);
 static void	zyd_set_channel(struct ieee80211com *);
@@ -320,9 +317,6 @@ zyd_attach(device_t dev)
 
 	mtx_init(&sc->sc_txmtx, device_get_nameunit(sc->sc_dev),
 	    MTX_NETWORK_LOCK, MTX_DEF);
-	usb_init_task(&sc->sc_mcasttask, zyd_set_multi, sc);
-	usb_init_task(&sc->sc_scantask, zyd_scantask, sc);
-	usb_init_task(&sc->sc_task, zyd_task, sc);
 	callout_init(&sc->sc_watchdog_ch, 0);
 	STAILQ_INIT(&sc->sc_rqh);
 
@@ -656,18 +650,23 @@ zyd_node_alloc(struct ieee80211vap *vap __unused,
 	return (zn != NULL) ? (&zn->ni) : (NULL);
 }
 
-static void
-zyd_task(void *arg)
+static int
+zyd_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 {
-	int error;
-	struct zyd_softc *sc = arg;
-	struct ifnet *ifp = sc->sc_ifp;
-	struct ieee80211com *ic = ifp->if_l2com;
-	struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
-	struct ieee80211_node *ni = vap->iv_bss;
 	struct zyd_vap *zvp = ZYD_VAP(vap);
+	struct ieee80211_node *ni = vap->iv_bss;
+	struct ieee80211com *ic = vap->iv_ic;
+	struct zyd_softc *sc = ic->ic_ifp->if_softc;
+	int error;
 
-	switch (sc->sc_state) {
+	DPRINTF(sc, ZYD_DEBUG_STATE, "%s: %s -> %s\n", __func__,
+	    ieee80211_state_name[vap->iv_state],
+	    ieee80211_state_name[nstate]);
+
+	callout_stop(&sc->sc_watchdog_ch);
+	IEEE80211_UNLOCK(ic);
+	ZYD_LOCK(sc);
+	switch (nstate) {
 	case IEEE80211_S_AUTH:
 		zyd_set_chan(sc, ic->ic_curchan);
 		break;
@@ -689,40 +688,10 @@ zyd_task(void *arg)
 	default:
 		break;
 	}
-
 fail:
+	ZYD_UNLOCK(sc);
 	IEEE80211_LOCK(ic);
-	/* XXX no checking return value. */
-	zvp->newstate(vap, sc->sc_state, sc->sc_arg);
-	IEEE80211_UNLOCK(ic);
-}
-
-static int
-zyd_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
-{
-	struct zyd_vap *zvp = ZYD_VAP(vap);
-	struct ieee80211com *ic = vap->iv_ic;
-	struct zyd_softc *sc = ic->ic_ifp->if_softc;
-
-	DPRINTF(sc, ZYD_DEBUG_STATE, "%s: %s -> %s\n", __func__,
-	    ieee80211_state_name[vap->iv_state],
-	    ieee80211_state_name[nstate]);
-
-	usb_rem_task(sc->sc_udev, &sc->sc_scantask);
-	usb_rem_task(sc->sc_udev, &sc->sc_task);
-	callout_stop(&sc->sc_watchdog_ch);
-
-	/* do it in a process context */
-	sc->sc_state = nstate;
-	sc->sc_arg = arg;
-
-	if (nstate == IEEE80211_S_INIT) {
-		zvp->newstate(vap, nstate, arg);
-		return (0);
-	} else {
-		usb_add_task(sc->sc_udev, &sc->sc_task, USB_TASKQ_DRIVER);
-		return (EINPROGRESS);
-	}
+	return (zvp->newstate(vap, nstate, arg));
 }
 
 static int
@@ -1915,15 +1884,17 @@ fail:
 }
 
 static void
-zyd_set_multi(void *arg)
+zyd_update_mcast(struct ifnet *ifp)
 {
-	int error;
-	struct zyd_softc *sc = arg;
-	struct ifnet *ifp = sc->sc_ifp;
+	struct zyd_softc *sc = ifp->if_softc;
 	struct ieee80211com *ic = ifp->if_l2com;
 	struct ifmultiaddr *ifma;
+	int error;
 	uint32_t low, high;
 	uint8_t v;
+
+	if (!(sc->sc_flags & ZYD_FLAG_INITDONE))
+		return;
 
 	if (!(ifp->if_flags & IFF_UP))
 		return;
@@ -1957,17 +1928,6 @@ fail:
 	if (error != 0)
 		device_printf(sc->sc_dev,
 		    "could not set multicast hash table\n");
-}
-
-static void
-zyd_update_mcast(struct ifnet *ifp)
-{
-	struct zyd_softc *sc = ifp->if_softc;
-
-	if (!(sc->sc_flags & ZYD_FLAG_INITDONE))
-		return;
-
-	usb_add_task(sc->sc_udev, &sc->sc_mcasttask, USB_TASKQ_DRIVER);
 }
 
 static int
@@ -2735,7 +2695,7 @@ zyd_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if (ifp->if_drv_flags & IFF_DRV_RUNNING) {
 				if ((ifp->if_flags ^ sc->sc_if_flags) &
 				    (IFF_ALLMULTI | IFF_PROMISC))
-					zyd_set_multi(sc);
+					zyd_update_mcast(sc->sc_ifp);
 			} else {
 				zyd_init_locked(sc);
 				startall = 1;
@@ -2848,7 +2808,7 @@ zyd_init_locked(struct zyd_softc *sc)
 	/* promiscuous mode */
 	zyd_write32_m(sc, ZYD_MAC_SNIFFER, 0);
 	/* multicast setup */
-	zyd_set_multi(sc);
+	zyd_update_mcast(sc->sc_ifp);
 	/* set RX filter  */
 	error = zyd_set_rxfilter(sc);
 	if (error != 0)
@@ -2937,8 +2897,6 @@ zyd_stop(struct zyd_softc *sc, int disable)
 	/* disable interrupts */
 	zyd_write32_m(sc, ZYD_CR_INTERRUPT, 0);
 
-	usb_rem_task(sc->sc_udev, &sc->sc_scantask);
-	usb_rem_task(sc->sc_udev, &sc->sc_task);
 	callout_stop(&sc->sc_watchdog_ch);
 
 	usbd_abort_pipe(sc->sc_ep[ZYD_ENDPT_BIN]);
@@ -3013,13 +2971,13 @@ zyd_loadfirmware(struct zyd_softc *sc)
 static void
 zyd_scan_start(struct ieee80211com *ic)
 {
-	struct zyd_softc *sc = ic->ic_ifp->if_softc;
+	struct ifnet *ifp = ic->ic_ifp;
+	struct zyd_softc *sc = ifp->if_softc;
 
-	usb_rem_task(sc->sc_udev, &sc->sc_scantask);
-
-	/* do it in a process context */
-	sc->sc_scan_action = ZYD_SCAN_START;
-	usb_add_task(sc->sc_udev, &sc->sc_scantask, USB_TASKQ_DRIVER);
+	ZYD_LOCK(sc);
+	/* want broadcast address while scanning */
+	zyd_set_bssid(sc, ifp->if_broadcastaddr);
+	ZYD_UNLOCK(sc);
 }
 
 static void
@@ -3027,11 +2985,10 @@ zyd_scan_end(struct ieee80211com *ic)
 {
 	struct zyd_softc *sc = ic->ic_ifp->if_softc;
 
-	usb_rem_task(sc->sc_udev, &sc->sc_scantask);
-
-	/* do it in a process context */
-	sc->sc_scan_action = ZYD_SCAN_END;
-	usb_add_task(sc->sc_udev, &sc->sc_scantask, USB_TASKQ_DRIVER);
+	ZYD_LOCK(sc);
+	/* restore previous bssid */
+	zyd_set_bssid(sc, sc->sc_bssid);
+	ZYD_UNLOCK(sc);
 }
 
 static void
@@ -3039,40 +2996,9 @@ zyd_set_channel(struct ieee80211com *ic)
 {
 	struct zyd_softc *sc = ic->ic_ifp->if_softc;
 
-	usb_rem_task(sc->sc_udev, &sc->sc_scantask);
-	/* do it in a process context */
-	sc->sc_scan_action = ZYD_SET_CHANNEL;
-	usb_add_task(sc->sc_udev, &sc->sc_scantask, USB_TASKQ_DRIVER);
-}
-
-static void
-zyd_scantask(void *arg)
-{
-	struct zyd_softc *sc = arg;
-	struct ifnet *ifp = sc->sc_ifp;
-	struct ieee80211com *ic = ifp->if_l2com;
-
 	ZYD_LOCK(sc);
-
-	switch (sc->sc_scan_action) {
-	case ZYD_SCAN_START:
-		/* want broadcast address while scanning */
-                zyd_set_bssid(sc, ifp->if_broadcastaddr);
-                break;
-        case ZYD_SCAN_END:
-		/* restore previous bssid */
-                zyd_set_bssid(sc, sc->sc_bssid);
-                break;
-        case ZYD_SET_CHANNEL:
-                zyd_set_chan(sc, ic->ic_curchan);
-                break;
-        default:
-                device_printf(sc->sc_dev, "unknown scan action %d\n",
-		    sc->sc_scan_action);
-                break;
-        }
-
-        ZYD_UNLOCK(sc);
+	zyd_set_chan(sc, ic->ic_curchan);
+	ZYD_UNLOCK(sc);
 }
 
 static void
