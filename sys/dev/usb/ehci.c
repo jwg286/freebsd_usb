@@ -2550,9 +2550,9 @@ ehci_close_pipe(usbd_pipe_handle pipe, ehci_soft_qh_t *head)
 	ehci_soft_qh_t *sqh = epipe->sqh;
 	int s;
 
-	s = splusb();
+	EHCI_LOCK(sc);
 	ehci_rem_qh(sc, sqh, head);
-	splx(s);
+	EHCI_UNLOCK(sc);
 	pipe->endpoint->savedtoggle =
 	    EHCI_QTD_GET_TOGGLE(le32toh(sqh->qh.qh_qtd.qtd_status));
 	ehci_free_sqh(sc, epipe->sqh);
