@@ -236,6 +236,8 @@ static void		ehci_dump_sqh(ehci_soft_qh_t *);
 static void		ehci_dump_exfer(struct ehci_xfer *);
 #endif
 #endif
+static void		ehci_delay_ms(struct ehci_softc *, u_int);
+
 
 #define EHCI_NULL htole32(EHCI_LINK_TERMINATE)
 
@@ -322,7 +324,7 @@ ehci_hcreset(ehci_softc_t *sc)
 
 	EOWRITE4(sc, EHCI_USBCMD, 0);	/* Halt controller */
 	for (i = 0; i < 100; i++) {
-		ehci_delay_ms(&sc->sc_bus, 1);
+		ehci_delay_ms(sc, 1);
 		hcr = EOREAD4(sc, EHCI_USBSTS) & EHCI_STS_HCH;
 		if (hcr)
 			break;
@@ -338,7 +340,7 @@ ehci_hcreset(ehci_softc_t *sc)
 
 	EOWRITE4(sc, EHCI_USBCMD, EHCI_CMD_HCRESET);
 	for (i = 0; i < 100; i++) {
-		ehci_delay_ms(&sc->sc_bus, 1);
+		ehci_delay_ms(sc, 1);
 		hcr = EOREAD4(sc, EHCI_USBCMD) & EHCI_CMD_HCRESET;
 		if (!hcr)
 			return (USBD_NORMAL_COMPLETION);
@@ -521,7 +523,7 @@ ehci_init(ehci_softc_t *sc)
 	EOWRITE4(sc, EHCI_CONFIGFLAG, EHCI_CONF_CF);
 
 	for (i = 0; i < 100; i++) {
-		ehci_delay_ms(&sc->sc_bus, 1);
+		ehci_delay_ms(sc, 1);
 		hcr = EOREAD4(sc, EHCI_USBSTS) & EHCI_STS_HCH;
 		if (!hcr)
 			break;
@@ -923,7 +925,7 @@ ehci_waitintr(ehci_softc_t *sc, usbd_xfer_handle xfer)
 
 	xfer->status = USBD_IN_PROGRESS;
 	for (usecs = timo * 1000000 / hz; usecs > 0; usecs -= 1000) {
-		ehci_delay_ms(&sc->sc_bus, 1);
+		ehci_delay_ms(sc, 1);
 		if (sc->sc_dying)
 			break;
 		intrs = EHCI_STS_INTRS(EOREAD4(sc, EHCI_USBSTS)) &
@@ -983,7 +985,7 @@ ehci_detach(struct ehci_softc *sc, int flags)
 	if (sc->sc_shutdownhook != NULL)
 		shutdownhook_disestablish(sc->sc_shutdownhook);
 #endif
-	ehci_delay_ms(&sc->sc_bus, 300); /* XXX let stray task complete */
+	ehci_delay_ms(sc, 300); /* XXX let stray task complete */
 
 	usb_freemem(&sc->sc_bus, &sc->sc_fldma);
 	/* XXX free other data structures XXX */
@@ -1036,7 +1038,7 @@ ehci_power(int why, void *v)
 			if (hcr == 0)
 				break;
 
-			ehci_delay_ms(&sc->sc_bus, 1);
+			ehci_delay_ms(sc, 1);
 		}
 		if (hcr != 0) {
 			printf("%s: reset timeout\n",
@@ -1051,7 +1053,7 @@ ehci_power(int why, void *v)
 			if (hcr == EHCI_STS_HCH)
 				break;
 
-			ehci_delay_ms(&sc->sc_bus, 1);
+			ehci_delay_ms(sc, 1);
 		}
 		if (hcr != EHCI_STS_HCH) {
 			printf("%s: config timeout\n",
@@ -1083,7 +1085,7 @@ ehci_power(int why, void *v)
 		}
 
 		if (hcr) {
-			ehci_delay_ms(&sc->sc_bus, USB_RESUME_WAIT);
+			ehci_delay_ms(sc, USB_RESUME_WAIT);
 
 			for (i = 1; i <= sc->sc_noport; i++) {
 				cmd = EOREAD4(sc, EHCI_PORTSC(i));
@@ -1101,14 +1103,14 @@ ehci_power(int why, void *v)
 			if (hcr != EHCI_STS_HCH)
 				break;
 
-			ehci_delay_ms(&sc->sc_bus, 1);
+			ehci_delay_ms(sc, 1);
 		}
 		if (hcr == EHCI_STS_HCH) {
 			printf("%s: config timeout\n",
 			    device_get_nameunit(sc->sc_bus.bdev));
 		}
 
-		ehci_delay_ms(&sc->sc_bus, USB_RESUME_WAIT);
+		ehci_delay_ms(sc, USB_RESUME_WAIT);
 
 		sc->sc_bus.use_polling--;
 		break;
@@ -1373,7 +1375,6 @@ ehci_open(usbd_pipe_handle pipe)
 	struct ehci_pipe *epipe = (struct ehci_pipe *)pipe;
 	ehci_soft_qh_t *sqh;
 	usbd_status err;
-	int s;
 	int ival, speed, naks;
 	int hshubaddr, hshubport;
 
@@ -1461,15 +1462,15 @@ ehci_open(usbd_pipe_handle pipe)
 		if (err)
 			goto bad1;
 		pipe->methods = &ehci_device_ctrl_methods;
-		s = splusb();
+		EHCI_LOCK(sc);
 		ehci_add_qh(sc, sqh, sc->sc_async_head);
-		splx(s);
+		EHCI_UNLOCK(sc);
 		break;
 	case UE_BULK:
 		pipe->methods = &ehci_device_bulk_methods;
-		s = splusb();
+		EHCI_LOCK(sc);
 		ehci_add_qh(sc, sqh, sc->sc_async_head);
-		splx(s);
+		EHCI_UNLOCK(sc);
 		break;
 	case UE_INTERRUPT:
 		pipe->methods = &ehci_device_intr_methods;
@@ -2040,16 +2041,26 @@ ehci_root_ctrl_start(usbd_xfer_handle xfer)
 			/* Start reset sequence. */
 			v &= ~ (EHCI_PS_PE | EHCI_PS_PR);
 			EOWRITE4(sc, port, v | EHCI_PS_PR);
+			/* Unholding the pipe lock due to sleep */
+			USB_PIPE_UNLOCK(xfer->pipe);
+			EHCI_LOCK(sc);
 			/* Wait for reset to complete. */
-			ehci_delay_ms(&sc->sc_bus, USB_PORT_ROOT_RESET_DELAY);
+			ehci_delay_ms(sc, USB_PORT_ROOT_RESET_DELAY);
+			EHCI_UNLOCK(sc);
+			USB_PIPE_LOCK(xfer->pipe);
 			if (sc->sc_dying) {
 				err = USBD_IOERROR;
 				goto ret;
 			}
 			/* Terminate reset sequence. */
 			EOWRITE4(sc, port, v);
+			/* Unholding the pipe lock due to sleep */
+			USB_PIPE_UNLOCK(xfer->pipe);
+			EHCI_LOCK(sc);
 			/* Wait for HC to complete reset. */
-			ehci_delay_ms(&sc->sc_bus, EHCI_PORT_RESET_COMPLETE);
+			ehci_delay_ms(sc, EHCI_PORT_RESET_COMPLETE);
+			EHCI_UNLOCK(sc);
+			USB_PIPE_LOCK(xfer->pipe);
 			if (sc->sc_dying) {
 				err = USBD_IOERROR;
 				goto ret;
