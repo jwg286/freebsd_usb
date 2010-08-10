@@ -1530,7 +1530,6 @@ void
 uhci_timeout_task(void *addr)
 {
 	usbd_xfer_handle xfer = addr;
-	int s;
 
 	DPRINTF(("uhci_timeout_task: xfer=%p\n", xfer));
 
