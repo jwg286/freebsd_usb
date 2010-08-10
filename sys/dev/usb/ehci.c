@@ -3269,7 +3269,6 @@ ehci_device_intr_start(usbd_xfer_handle xfer)
 	ehci_soft_qh_t *sqh;
 	usbd_status err;
 	int len, isread, endpt;
-	int s;
 
 	DPRINTFN(2, ("ehci_device_intr_start: xfer=%p len=%d flags=%d\n",
 	    xfer, xfer->length, xfer->flags));
@@ -3333,7 +3332,7 @@ ehci_device_intr_start(usbd_xfer_handle xfer)
 	exfer->isdone = 0;
 #endif
 
-	s = splusb();
+	EHCI_LOCK(sc);
 	ehci_activate_qh(sqh, data);
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
 		callout_reset(&xfer->timeout_handle, MS_TO_TICKS(xfer->timeout),
@@ -3341,7 +3340,7 @@ ehci_device_intr_start(usbd_xfer_handle xfer)
 	}
 	ehci_add_intr_list(sc, exfer);
 	xfer->status = USBD_IN_PROGRESS;
-	splx(s);
+	EHCI_UNLOCK(sc);
 
 #ifdef EHCI_DEBUG
 	if (ehcidebug > 10) {
@@ -3395,7 +3394,7 @@ ehci_device_intr_done(usbd_xfer_handle xfer)
 	ehci_soft_qtd_t *data, *dataend, *newinactive;
 	ehci_soft_qh_t *sqh;
 	usbd_status err;
-	int len, isread, endpt, s;
+	int len, isread, endpt;
 
 	DPRINTFN(10, ("ehci_device_intr_done: xfer=%p, actlen=%d\n",
 	    xfer, xfer->actlen));
@@ -3446,13 +3445,13 @@ ehci_device_intr_done(usbd_xfer_handle xfer)
 		exfer->isdone = 0;
 #endif
 
-		s = splusb();
+		EHCI_LOCK(sc);
 		ehci_activate_qh(sqh, data);
 		if (xfer->timeout && !sc->sc_bus.use_polling) {
 			callout_reset(&xfer->timeout_handle,
 			    MS_TO_TICKS(xfer->timeout), ehci_timeout, xfer);
 		}
-		splx(s);
+		EHCI_UNLOCK(sc);
 
 		xfer->status = USBD_IN_PROGRESS;
 	} else if (xfer->status != USBD_NOMEM && ehci_active_intr_list(ex)) {
