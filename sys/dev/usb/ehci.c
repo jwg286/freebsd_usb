@@ -2589,6 +2589,8 @@ ehci_abort_xfer(usbd_xfer_handle xfer, usbd_status status)
 
 	DPRINTF(("ehci_abort_xfer: xfer=%p pipe=%p\n", xfer, epipe));
 
+	USB_PIPE_LOCK_ASSERT(xfer->pipe);
+
 	if (sc->sc_dying) {
 		/* If we're dying, just do the software part. */
 		s = splusb();
