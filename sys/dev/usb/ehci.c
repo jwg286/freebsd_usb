@@ -807,27 +807,29 @@ ehci_idone(struct ehci_xfer *ex)
 	int actlen, cerr;
 
 	DPRINTFN(/*12*/2, ("ehci_idone: ex=%p\n", ex));
+
+	USB_PIPE_LOCK(xfer->pipe);
+
 #ifdef DIAGNOSTIC
 	{
-		int s = splhigh();
 		if (ex->isdone) {
-			splx(s);
 #ifdef EHCI_DEBUG
 			printf("ehci_idone: ex is done!\n   ");
 			ehci_dump_exfer(ex);
 #else
 			printf("ehci_idone: ex=%p is done!\n", ex);
 #endif
+			USB_PIPE_UNLOCK(xfer->pipe);
 			return;
 		}
 		ex->isdone = 1;
-		splx(s);
 	}
 #endif
 
 	if (xfer->status == USBD_CANCELLED ||
 	    xfer->status == USBD_TIMEOUT) {
 		DPRINTF(("ehci_idone: aborted xfer=%p\n", xfer));
+		USB_PIPE_UNLOCK(xfer->pipe);
 		return;
 	}
 
@@ -909,6 +911,7 @@ ehci_idone(struct ehci_xfer *ex)
 	}
 
 	usb_transfer_complete(xfer);
+	USB_PIPE_UNLOCK(xfer->pipe);
 	DPRINTFN(/*12*/2, ("ehci_idone: ex=%p done\n", ex));
 }
 
@@ -2344,12 +2347,11 @@ ehci_alloc_sqtd(ehci_softc_t *sc)
 void
 ehci_free_sqtd(ehci_softc_t *sc, ehci_soft_qtd_t *sqtd)
 {
-	int s;
 
-	s = splusb();
+	EHCI_LOCK(sc);
 	sqtd->nextqtd = sc->sc_freeqtds;
 	sc->sc_freeqtds = sqtd;
-	splx(s);
+	EHCI_UNLOCK(sc);
 }
 
 usbd_status
@@ -2904,7 +2906,6 @@ ehci_device_request(usbd_xfer_handle xfer)
 	int isread;
 	int len;
 	usbd_status err;
-	int s;
 
 	isread = req->bmRequestType & UT_READ;
 	len = UGETW(req->wLength);
@@ -3000,7 +3001,7 @@ ehci_device_request(usbd_xfer_handle xfer)
 #endif
 
 	/* Activate the new qTD in the QH list. */
-	s = splusb();
+	EHCI_LOCK(sc);
 	ehci_activate_qh(sqh, setup);
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
                 callout_reset(&xfer->timeout_handle, MS_TO_TICKS(xfer->timeout),
@@ -3008,7 +3009,7 @@ ehci_device_request(usbd_xfer_handle xfer)
 	}
 	ehci_add_intr_list(sc, exfer);
 	xfer->status = USBD_IN_PROGRESS;
-	splx(s);
+	EHCI_UNLOCK(sc);
 
 #ifdef EHCI_DEBUG
 	if (ehcidebug > 10) {
