@@ -2256,6 +2256,7 @@ ehci_alloc_sqh(ehci_softc_t *sc)
 #endif
 		if (err)
 			return (NULL);
+		EHCI_LOCK(sc);
 		for(i = 0; i < EHCI_SQH_CHUNK; i++) {
 			offs = i * EHCI_SQH_SIZE;
 			sqh = KERNADDR(&dma, offs);
@@ -2263,6 +2264,7 @@ ehci_alloc_sqh(ehci_softc_t *sc)
 			sqh->next = sc->sc_freeqhs;
 			sc->sc_freeqhs = sqh;
 		}
+		EHCI_UNLOCK(sc);
 	}
 	/* Allocate the initial inactive sqtd. */
 	sqtd = ehci_alloc_sqtd(sc);
@@ -2272,8 +2274,10 @@ ehci_alloc_sqh(ehci_softc_t *sc)
 	sqtd->qtd.qtd_next = EHCI_NULL;
 	sqtd->qtd.qtd_altnext = EHCI_NULL;
 
+	EHCI_LOCK(sc);
 	sqh = sc->sc_freeqhs;
 	sc->sc_freeqhs = sqh->next;
+	EHCI_UNLOCK(sc);
 
 	/* The overlay QTD should begin zeroed. */
 	sqh->qh.qh_qtd.qtd_next = htole32(sqtd->physaddr);
@@ -2294,8 +2298,10 @@ void
 ehci_free_sqh(ehci_softc_t *sc, ehci_soft_qh_t *sqh)
 {
 	ehci_free_sqtd(sc, sqh->inactivesqtd);
+	EHCI_LOCK(sc);
 	sqh->next = sc->sc_freeqhs;
 	sc->sc_freeqhs = sqh;
+	EHCI_UNLOCK(sc);
 }
 
 ehci_soft_qtd_t *
@@ -2548,7 +2554,6 @@ ehci_close_pipe(usbd_pipe_handle pipe, ehci_soft_qh_t *head)
 	struct ehci_pipe *epipe = (struct ehci_pipe *)pipe;
 	ehci_softc_t *sc = (ehci_softc_t *)pipe->device->bus;
 	ehci_soft_qh_t *sqh = epipe->sqh;
-	int s;
 
 	EHCI_LOCK(sc);
 	ehci_rem_qh(sc, sqh, head);
